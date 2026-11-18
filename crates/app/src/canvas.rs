@@ -182,10 +182,9 @@ impl Canvas {
         let p = to_canvas(p);
         stroke.add(doc, p.x, p.y, pressure);
       }
-      if released {
-        self.last_point = stroke.position();
-        self.stroke = None;
-      }
+    }
+    if released && let Some(stroke) = self.stroke.take() {
+      self.last_point = stroke.finish(doc);
     }
   }
 }

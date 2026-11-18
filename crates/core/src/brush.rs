@@ -7,7 +7,7 @@
 //! into its own place (patch smudging, as in Krita), with the brush's shape and opacity as
 //! strength. They never add color, so smudging an empty layer leaves it empty.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{Document, TILE};
 
@@ -31,9 +31,14 @@ pub struct Brush {
   /// 0..=1, how much pen pressure scales the flow.
   pub pressure_flow: f32,
   /// Stroke length in pixels over which the start grows from a point to full size.
-  pub taper: f32,
+  pub taper_start: f32,
+  /// Stroke length in pixels over which the end thins to a point (applied when it ends).
+  pub taper_end: f32,
   /// 0..=1, how much the path is smoothed (StreamLine). Higher lags more.
   pub streamline: f32,
+  /// Pulled-string stabilizer (Photoshop): the brush only moves once the pointer is this many
+  /// pixels away, so small wobbles never reach the canvas. 0 = off.
+  pub string: f32,
 }
 
 impl Brush {
@@ -47,8 +52,10 @@ impl Brush {
       buildup: false,
       pressure_size: 0.6,
       pressure_flow: 0.8,
-      taper: 0.0,
+      taper_start: 0.0,
+      taper_end: 0.0,
       streamline: 0.1,
+      string: 0.0,
     }
   }
 
@@ -62,8 +69,10 @@ impl Brush {
       buildup: false,
       pressure_size: 0.9,
       pressure_flow: 0.0,
-      taper: 40.0,
+      taper_start: 40.0,
+      taper_end: 40.0,
       streamline: 0.4,
+      string: 0.0,
     }
   }
 
@@ -77,10 +86,22 @@ impl Brush {
       buildup: true,
       pressure_size: 0.0,
       pressure_flow: 1.0,
-      taper: 0.0,
+      taper_start: 0.0,
+      taper_end: 0.0,
       streamline: 0.0,
+      string: 0.0,
     }
   }
+}
+
+/// A stamped dab, kept so the end taper can re-stamp the tail when the stroke ends.
+#[derive(Debug, Clone, Copy)]
+struct Dab {
+  x: f32,
+  y: f32,
+  pressure: f32,
+  /// Path length at this dab, for the tapers.
+  at: f32,
 }
 
 /// A tile touched by the stroke: its pixels before the stroke and the stroke's coverage.
@@ -105,6 +126,11 @@ pub struct Stroke {
   carry: f32,
   /// Smudge: where the previous dab was, the paint is picked up from.
   smudged: Option<(f32, f32)>,
+  dabs: Vec<Dab>,
+  /// The latest pointer sample before any stabilizing, which the stroke reaches when it ends.
+  pointer: Option<(f32, f32, f32)>,
+  /// Pulled string: the end of the string the pointer drags.
+  pulled: Option<(f32, f32)>,
 }
 
 impl Document {
@@ -117,7 +143,21 @@ impl Document {
     }
     let layer_id = layer.id;
     self.checkpoint();
-    Some(Stroke { brush, color, erase, smudge: false, layer_id, tiles: HashMap::new(), last: None, travelled: 0.0, carry: 0.0, smudged: None })
+    Some(Stroke {
+      brush,
+      color,
+      erase,
+      smudge: false,
+      layer_id,
+      tiles: HashMap::new(),
+      last: None,
+      travelled: 0.0,
+      carry: 0.0,
+      smudged: None,
+      dabs: Vec::new(),
+      pointer: None,
+      pulled: None,
+    })
   }
 
   /// Starts a smudge stroke on the active layer, as one undo step. `None` if it is locked.
@@ -132,6 +172,20 @@ impl Stroke {
   /// Adds a pointer sample in canvas pixels, pressure 0..=1 (1 for a mouse).
   pub fn add(&mut self, doc: &mut Document, x: f32, y: f32, pressure: f32) {
     let pressure = pressure.clamp(0.0, 1.0);
+    self.pointer = Some((x, y, pressure));
+    // Pulled string: drag the string's end only as far as the pointer pulls it.
+    let (x, y) = match self.pulled {
+      Some((sx, sy)) if self.brush.string > 0.0 => {
+        let distance = (x - sx).hypot(y - sy);
+        if distance <= self.brush.string {
+          return;
+        }
+        let t = (distance - self.brush.string) / distance;
+        (sx + (x - sx) * t, sy + (y - sy) * t)
+      }
+      _ => (x, y),
+    };
+    self.pulled = Some((x, y));
     let Some((lx, ly, lp)) = self.last else {
       self.last = Some((x, y, pressure));
       self.dab(doc, x, y, pressure);
@@ -152,6 +206,47 @@ impl Stroke {
     }
     self.segment(doc, (from.0, from.1, pressure), (to.0, to.1, pressure));
     self.last = Some((to.0, to.1, pressure));
+    self.pointer = self.last;
+    self.pulled = Some(to);
+  }
+
+  /// Ends the stroke: catches up with the pointer (StreamLine and the string lag behind it), then
+  /// thins the end. The taper re-stamps the tail's tiles from their pre-stroke pixels. Returns
+  /// where the stroke ended, for the next Shift+click line.
+  pub fn finish(mut self, doc: &mut Document) -> Option<(f32, f32)> {
+    if let (Some(last), Some(pointer)) = (self.last, self.pointer) {
+      self.segment(doc, last, pointer);
+      self.last = Some(pointer);
+    }
+    let taper = self.brush.taper_end;
+    let end = self.position();
+    let Some(total) = self.dabs.last().map(|d| d.at) else { return end };
+    if self.smudge || taper <= 0.0 {
+      return end;
+    }
+    let tail = self.dabs.iter().position(|d| total - d.at < taper).unwrap_or(self.dabs.len());
+    let mut affected = HashSet::new();
+    for d in &self.dabs[tail..] {
+      let radius = self.diameter(d.pressure, d.at) / 2.0;
+      for ty in ((d.y - radius).max(0.0) as u32 / TILE)..=((d.y + radius).max(0.0) as u32 / TILE) {
+        for tx in ((d.x - radius).max(0.0) as u32 / TILE)..=((d.x + radius).max(0.0) as u32 / TILE) {
+          if self.tiles.contains_key(&(tx, ty)) {
+            affected.insert((tx, ty));
+          }
+        }
+      }
+    }
+    let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return end };
+    for key in &affected {
+      let tile = self.tiles.get_mut(key).expect("affected tiles were stamped");
+      tile.coverage.fill(0.0);
+      layer.tile_mut(key.0, key.1).copy_from_slice(&tile.before);
+    }
+    for (i, d) in std::mem::take(&mut self.dabs).into_iter().enumerate() {
+      let scale = if i >= tail { 0.15 + 0.85 * ((total - d.at) / taper).clamp(0.0, 1.0) } else { 1.0 };
+      self.stamp(doc, d, scale, Some(&affected));
+    }
+    end
   }
 
   /// Where the stroke is now, in canvas pixels.
@@ -167,27 +262,35 @@ impl Stroke {
       let t = if length > 0.0 { at / length } else { 1.0 };
       let pressure = a.2 + (b.2 - a.2) * t;
       self.dab(doc, a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, pressure);
-      let step = (self.diameter(pressure) * self.brush.spacing).max(0.5);
+      let step = (self.diameter(pressure, self.travelled) * self.brush.spacing).max(0.5);
       at += step;
       self.travelled += step;
     }
     self.carry = at - length;
   }
 
-  fn diameter(&self, pressure: f32) -> f32 {
-    let taper = if self.brush.taper > 0.0 { (self.travelled / self.brush.taper).min(1.0) } else { 1.0 };
+  /// The dab diameter at `pressure` and path length `at`, with the start taper.
+  fn diameter(&self, pressure: f32, at: f32) -> f32 {
+    let taper = if self.brush.taper_start > 0.0 { (at / self.brush.taper_start).min(1.0) } else { 1.0 };
     let pressure = 1.0 - self.brush.pressure_size * (1.0 - pressure);
-    // shortcut: tapers only the start; the end needs the stroke's length, known only when it ends.
     (self.brush.size * pressure * (0.15 + 0.85 * taper)).max(1.0)
   }
 
-  /// Stamps one dab centered at (x, y).
+  /// Stamps one dab centered at (x, y) and remembers it.
   fn dab(&mut self, doc: &mut Document, x: f32, y: f32, pressure: f32) {
     if self.smudge {
       return self.smudge_dab(doc, x, y, pressure);
     }
+    let dab = Dab { x, y, pressure, at: self.travelled };
+    self.dabs.push(dab);
+    self.stamp(doc, dab, 1.0, None);
+  }
+
+  /// Stamps `d` at `scale` × its size, only into the `only` tiles when given.
+  fn stamp(&mut self, doc: &mut Document, d: Dab, scale: f32, only: Option<&HashSet<(u32, u32)>>) {
+    let Dab { x, y, pressure, .. } = d;
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
-    let radius = self.diameter(pressure) / 2.0;
+    let radius = (self.diameter(pressure, d.at) * scale).max(1.0) / 2.0;
     let flow = self.brush.flow * (1.0 - self.brush.pressure_flow * (1.0 - pressure));
     let opacity = self.brush.opacity.clamp(0.0, 1.0);
     // Soft part of the edge; at least one pixel so hard edges are antialiased.
@@ -200,6 +303,9 @@ impl Stroke {
     let (x1, y1) = (x1 as u32, y1 as u32);
     for ty in y0 / TILE..=y1 / TILE {
       for tx in x0 / TILE..=x1 / TILE {
+        if only.is_some_and(|only| !only.contains(&(tx, ty))) {
+          continue;
+        }
         let pixels = layer.tile_mut(tx, ty);
         let tile = self.tiles.entry((tx, ty)).or_insert_with(|| StrokeTile { before: pixels.to_vec(), coverage: vec![0.0; (TILE * TILE) as usize] });
         for py in y0.max(ty * TILE)..=y1.min(ty * TILE + TILE - 1) {
@@ -237,7 +343,7 @@ impl Stroke {
     let Some((from_x, from_y)) = self.smudged.replace((x, y)) else { return };
     let (width, height) = (doc.width, doc.height);
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
-    let radius = self.diameter(pressure) / 2.0;
+    let radius = self.diameter(pressure, self.travelled) / 2.0;
     let strength = self.brush.opacity.clamp(0.0, 1.0) * (1.0 - self.brush.pressure_flow * (1.0 - pressure));
     let inner = (radius * self.brush.hardness.clamp(0.0, 1.0)).min(radius - 1.0).max(0.0);
     let (x0, y0) = ((x - radius).floor().max(0.0) as u32, (y - radius).floor().max(0.0) as u32);
@@ -321,8 +427,10 @@ mod tests {
       buildup: false,
       pressure_size: 0.0,
       pressure_flow: 0.0,
-      taper: 0.0,
+      taper_start: 0.0,
+      taper_end: 0.0,
       streamline: 0.0,
+      string: 0.0,
     }
   }
 
@@ -384,7 +492,7 @@ mod tests {
     assert_eq!(alpha(&doc, 0, 150, 165), 255, "full pressure: 40 px wide");
 
     let mut doc = Document::new(400, 100);
-    line(&mut doc, Brush { taper: 200.0, ..flat(40.0, 1.0) }, false, (10.0, 50.0), (390.0, 50.0));
+    line(&mut doc, Brush { taper_start: 200.0, ..flat(40.0, 1.0) }, false, (10.0, 50.0), (390.0, 50.0));
     assert_eq!(alpha(&doc, 0, 15, 62), 0, "thin at the start");
     assert_eq!(alpha(&doc, 0, 350, 62), 255, "full size after the taper");
   }
@@ -424,6 +532,37 @@ mod tests {
     stroke.add(&mut empty, 10.0, 10.0, 1.0);
     stroke.add(&mut empty, 50.0, 50.0, 1.0);
     assert_eq!(empty.layers()[0].painted_tiles(), 0, "smudging nothing creates no paint");
+  }
+
+  #[test]
+  fn end_taper_thins_the_tail_when_the_stroke_ends() {
+    let mut doc = Document::new(400, 100);
+    let mut stroke = doc.begin_stroke(Brush { taper_end: 120.0, ..flat(40.0, 1.0) }, [0, 0, 0], false).unwrap();
+    for i in 0..=20 {
+      stroke.add(&mut doc, 10.0 + 19.0 * i as f32, 50.0, 1.0);
+    }
+    assert_eq!(alpha(&doc, 0, 385, 64), 255, "full width while drawing");
+    stroke.finish(&mut doc);
+    assert_eq!(alpha(&doc, 0, 385, 64), 0, "thin at the end once it ends");
+    assert_eq!(alpha(&doc, 0, 385, 50), 255, "the tail is still there");
+    assert_eq!(alpha(&doc, 0, 100, 64), 255, "the body keeps its width");
+    assert!(doc.undo());
+    assert_eq!(alpha(&doc, 0, 100, 50), 0, "still one undo step");
+  }
+
+  #[test]
+  fn pulled_string_ignores_wobble_and_finish_catches_up() {
+    let mut doc = Document::new(400, 100);
+    let mut stroke = doc.begin_stroke(Brush { string: 30.0, ..flat(6.0, 1.0) }, [0, 0, 0], false).unwrap();
+    stroke.add(&mut doc, 50.0, 50.0, 1.0);
+    // A wobble inside the string's length draws nothing.
+    stroke.add(&mut doc, 50.0, 75.0, 1.0);
+    stroke.add(&mut doc, 50.0, 50.0, 1.0);
+    assert_eq!(alpha(&doc, 0, 50, 70), 0);
+    stroke.add(&mut doc, 300.0, 50.0, 1.0);
+    assert_eq!(alpha(&doc, 0, 290, 50), 0, "the brush trails the pointer by the string");
+    assert_eq!(stroke.finish(&mut doc), Some((300.0, 50.0)), "ending reaches the pointer");
+    assert_eq!(alpha(&doc, 0, 299, 50), 255);
   }
 
   #[test]

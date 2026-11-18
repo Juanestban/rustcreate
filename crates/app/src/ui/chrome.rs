@@ -235,6 +235,28 @@ impl App {
         self.canvas.tools.selected = index;
       }
     }
+
+    // shortcut: the selected brush's stroke settings live here until Brush Studio exists.
+    ui.separator();
+    ui.label(RichText::new(self.i18n.tr("ui-brush-stroke")).color(palette.muted));
+    let brush = self.canvas.tools.brush_mut();
+    let mut streamline = brush.streamline * 100.0;
+    egui::Grid::new("stroke-settings").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+      ui.label(self.i18n.tr("ui-brush-streamline"));
+      if ui.add(egui::Slider::new(&mut streamline, 0.0..=95.0).suffix(" %").fixed_decimals(0)).changed() {
+        brush.streamline = streamline / 100.0;
+      }
+      ui.end_row();
+      ui.label(self.i18n.tr("ui-brush-string")).on_hover_text(self.i18n.tr("ui-brush-string-help"));
+      ui.add(egui::Slider::new(&mut brush.string, 0.0..=200.0).suffix(" px").fixed_decimals(0));
+      ui.end_row();
+      ui.label(self.i18n.tr("ui-brush-taper-start"));
+      ui.add(egui::Slider::new(&mut brush.taper_start, 0.0..=500.0).suffix(" px").fixed_decimals(0));
+      ui.end_row();
+      ui.label(self.i18n.tr("ui-brush-taper-end"));
+      ui.add(egui::Slider::new(&mut brush.taper_end, 0.0..=500.0).suffix(" px").fixed_decimals(0));
+      ui.end_row();
+    });
   }
 
   fn layers_panel(&mut self, ui: &mut egui::Ui) {
