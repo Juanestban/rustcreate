@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::tip::unit;
-use crate::{Document, TILE, Tile};
+use crate::{Document, SelectMode, Selection, TILE, Tile};
 
 /// Reads the colors the bucket compares: the active layer, or every visible layer composited.
 struct Reference<'a> {
@@ -80,6 +80,7 @@ impl Document {
     let mask = mask.0;
     self.checkpoint();
     let (width, height) = (self.width, self.height);
+    let selection = self.selection.clone();
     let layer = &mut self.layers[self.active];
     // One pixel of margin for the grown edge.
     let (x0, y0, x1, y1) = (x0.saturating_sub(1), y0.saturating_sub(1), (x1 + 1).min(width - 1), (y1 + 1).min(height - 1));
@@ -94,15 +95,23 @@ impl Document {
           for px in x0.max(tx * TILE)..=x1.min(tx * TILE + TILE - 1) {
             let p = (((py % TILE) * TILE + px % TILE) * 4) as usize;
             let out = &mut pixels[p..p + 4];
+            // Outside the selection nothing changes; on its soft edge, partly.
+            let w = Selection::weight(selection.as_ref(), px, py);
+            if w <= 0.0 {
+              continue;
+            }
             if inside(px, py) {
-              out.copy_from_slice(&[color[0], color[1], color[2], 255]);
+              let color = [color[0], color[1], color[2], 255];
+              for ch in 0..4 {
+                out[ch] = (out[ch] as f32 * (1.0 - w) + color[ch] as f32 * w).round() as u8;
+              }
             } else if edge(px, py) {
               // Behind: the color shows only where the pixel is not already opaque.
-              let behind = 1.0 - out[3] as f32 / 255.0;
+              let behind = (1.0 - out[3] as f32 / 255.0) * w;
               for ch in 0..3 {
                 out[ch] = (out[ch] as f32 + color[ch] as f32 * behind).round() as u8;
               }
-              out[3] = 255;
+              out[3] = (out[3] as f32 + (255.0 - out[3] as f32) * w).round() as u8;
             }
           }
         }
@@ -123,6 +132,19 @@ impl Document {
     Some(Gradient { layer_id, before, kind, colors })
   }
 
+  /// Magic wand: selects the area around (x, y) the bucket would fill, combined by `mode`.
+  /// `false` if (x, y) is outside the canvas.
+  pub fn select_wand(&mut self, x: u32, y: u32, threshold: f32, all_layers: bool, mode: SelectMode) -> bool {
+    if x >= self.width || y >= self.height {
+      return false;
+    }
+    let (mask, _) = flood(&mut Reference { doc: self, all_layers, composites: HashMap::new() }, x, y, threshold);
+    let (w, h) = (self.width, self.height);
+    let data = (0..h).flat_map(|py| (0..w).map(move |px| (px, py))).map(|(px, py)| if mask.get(px, py) { 255 } else { 0 }).collect();
+    self.combine(data, mode);
+    true
+  }
+
   /// Fills the whole active layer with `color` (Alt+Backspace), as one undo step.
   pub fn fill_layer(&mut self, color: [u8; 3]) -> bool {
     let rgba = [color[0], color[1], color[2], 255];
@@ -138,6 +160,7 @@ impl Gradient {
     // the GPU if dragging feels slow on big canvases.
     let (width, height) = (doc.width, doc.height);
     let (tiles_x, tiles_y) = doc.tiles();
+    let selection = doc.selection.clone();
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
     let (dx, dy) = (to.0 - from.0, to.1 - from.1);
     let length2 = (dx * dx + dy * dy).max(1e-6);
@@ -159,7 +182,7 @@ impl Gradient {
             .clamp(0.0, 1.0);
             // Under half a level of noise keeps 8-bit gradients free of bands.
             let dither = unit(px.wrapping_mul(73_856_093) ^ py.wrapping_mul(19_349_663)) - 0.5;
-            let alpha = (a[3] + (b[3] - a[3]) * t) / 255.0;
+            let alpha = (a[3] + (b[3] - a[3]) * t) / 255.0 * Selection::weight(selection.as_ref(), px, py);
             let p = (((py % TILE) * TILE + px % TILE) * 4) as usize;
             let out = &mut pixels[p..p + 4];
             // Normal blending over the layer, in premultiplied color.

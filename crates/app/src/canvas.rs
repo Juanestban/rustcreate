@@ -3,14 +3,14 @@
 
 use eframe::egui::{self, Event, Key, Modifiers, Pos2, Rect, Vec2, vec2};
 use eframe::egui_wgpu::{self, wgpu};
-use rustcreate_core::{Document, Gradient, Shape, Stroke};
+use rustcreate_core::{Document, Gradient, SelectMode, SelectShape, Selection, Shape, Stroke};
 
 /// QuickShape: how long the pointer must rest, and how far (points) it may drift meanwhile.
 const HOLD_SECONDS: f64 = 0.6;
 const HOLD_SLOP: f32 = 4.0;
 use rustcreate_render::{CanvasRenderer, Placement};
 
-use crate::tools::{Tool, Tools};
+use crate::tools::{SelectKind, Tool, Tools};
 
 const MIN_ZOOM: f32 = 0.01;
 const MAX_ZOOM: f32 = 64.0;
@@ -105,6 +105,12 @@ pub struct Canvas {
   /// ColorDrop held still over the canvas: where it filled (canvas pixels), the pointer's x then
   /// (sliding sideways changes the threshold) and the threshold of the fill on screen.
   drop: Option<(Pos2, f32, f32)>,
+  /// The selection being drawn: how it combines (from Shift/Alt at the press) and its points
+  /// in canvas pixels (the corners for a rectangle or ellipse, the outline for the lasso).
+  selecting: Option<(SelectMode, Vec<Pos2>)>,
+  /// The selection's outline for the marching ants, in canvas pixels, and the mask it was
+  /// traced from (by address), so it is only traced again when the selection changes.
+  ants: (usize, Vec<[Pos2; 2]>),
 }
 
 /// A ring by the pointer: the color under it on top, the one before picking below.
@@ -146,6 +152,8 @@ impl Canvas {
       shape_handle: None,
       shift: false,
       drop: None,
+      selecting: None,
+      ants: (0, Vec::new()),
     }
   }
 
@@ -185,6 +193,7 @@ impl Canvas {
     ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, CanvasCallback { placement }));
     let to_screen = |p: Pos2| view.to_screen(rect.center(), canvas, p);
     self.tools.guides.draw(&ui.painter_at(rect), canvas, crate::ui::theme::ACCENT.gamma_multiply(0.75), to_screen);
+    self.draw_selection(ui, rect, doc, to_screen);
     if let Some((at, before)) = self.loupe {
       loupe(ui.painter(), at, self.tools.primary, before);
     }
@@ -298,6 +307,13 @@ impl Canvas {
       }
       if released {
         self.handle = None;
+      }
+      return;
+    }
+    // Selections: Alt subtracts here instead of picking a color.
+    if self.tools.tool == Tool::Select {
+      if !view_drag || self.selecting.is_some() {
+        self.select_input(ui, &to_canvas, doc, (pressed, released), (shift, alt), origin);
       }
       return;
     }
@@ -459,6 +475,106 @@ impl Canvas {
     }
   }
 
+  /// The selection tool: a drag draws a rectangle, ellipse or lasso, a click with the wand picks
+  /// an area; Shift adds and Alt subtracts. A click without a drag deselects.
+  fn select_input(
+    &mut self,
+    ui: &egui::Ui,
+    to_canvas: &impl Fn(Pos2) -> Pos2,
+    doc: &mut Document,
+    (pressed, released): (bool, bool),
+    (shift, alt): (bool, bool),
+    origin: Option<Pos2>,
+  ) {
+    let kind = self.tools.select_kind;
+    let mode = if shift {
+      SelectMode::Add
+    } else if alt {
+      SelectMode::Subtract
+    } else {
+      SelectMode::Replace
+    };
+    if pressed && let Some(origin) = origin {
+      let p = to_canvas(origin);
+      if kind == SelectKind::Wand {
+        if p.x >= 0.0 && p.y >= 0.0 {
+          doc.select_wand(p.x as u32, p.y as u32, self.tools.fill_threshold, self.tools.fill_all_layers, mode);
+        }
+        return;
+      }
+      self.selecting = Some((mode, vec![p]));
+    }
+    let Some((_, points)) = &mut self.selecting else { return };
+    if let Some(p) = ui.input(|i| i.pointer.interact_pos()).map(to_canvas) {
+      if kind == SelectKind::Lasso {
+        if points.last().is_none_or(|last| last.distance(p) >= 1.0) {
+          points.push(p);
+        }
+      } else {
+        points.truncate(1);
+        points.push(p);
+      }
+    }
+    if !released {
+      return;
+    }
+    let Some((mode, points)) = self.selecting.take() else { return };
+    let (a, b) = (points[0], *points.last().expect("starts with the press"));
+    let shape = match kind {
+      SelectKind::Lasso if points.len() >= 3 => Some(SelectShape::Polygon(points.iter().map(|p| (p.x, p.y)).collect())),
+      SelectKind::Rectangle if (b.x - a.x).abs() >= 1.0 && (b.y - a.y).abs() >= 1.0 => Some(SelectShape::Rectangle((a.x, a.y), (b.x, b.y))),
+      SelectKind::Ellipse if (b.x - a.x).abs() >= 1.0 && (b.y - a.y).abs() >= 1.0 => Some(SelectShape::Ellipse((a.x, a.y), (b.x, b.y))),
+      _ => None,
+    };
+    match shape {
+      Some(shape) => doc.select_shape(&shape, mode),
+      None if mode == SelectMode::Replace => {
+        doc.deselect();
+      }
+      None => {}
+    }
+  }
+
+  /// Marching ants around the selection, and the shape being drawn.
+  fn draw_selection(&mut self, ui: &egui::Ui, rect: Rect, doc: &Document, to_screen: impl Fn(Pos2) -> Pos2) {
+    let painter = ui.painter_at(rect);
+    let dark = egui::Stroke::new(1.0, egui::Color32::from_black_alpha(200));
+    let light = egui::Stroke::new(1.0, egui::Color32::WHITE);
+    if let Some((_, points)) = &self.selecting {
+      let outline: Vec<Pos2> = match self.tools.select_kind {
+        SelectKind::Lasso => points.clone(),
+        kind => {
+          let (a, b) = (points[0], *points.last().expect("starts with the press"));
+          if kind == SelectKind::Ellipse {
+            let (center, radius) = (a.lerp(b, 0.5), (b - a).abs() / 2.0);
+            (0..64).map(|i| center + Vec2::angled(i as f32 / 64.0 * std::f32::consts::TAU) * radius).collect()
+          } else {
+            vec![a, Pos2::new(b.x, a.y), b, Pos2::new(a.x, b.y)]
+          }
+        }
+      };
+      let screen: Vec<Pos2> = outline.into_iter().map(&to_screen).collect();
+      painter.add(egui::Shape::closed_line(screen.clone(), dark));
+      painter.add(egui::Shape::dashed_line(&[screen.as_slice(), &screen[..1]].concat(), light, 4.0, 4.0));
+    }
+    let Some(selection) = doc.selection() else {
+      self.ants = (0, Vec::new());
+      return;
+    };
+    let key = selection.data().as_ptr() as usize;
+    if self.ants.0 != key {
+      self.ants = (key, trace(selection));
+    }
+    // Dashes that march: the offset moves with time.
+    let offset = (ui.input(|i| i.time) * 12.0 % 8.0) as f32;
+    for [a, b] in &self.ants.1 {
+      let (a, b) = (to_screen(*a), to_screen(*b));
+      painter.line_segment([a, b], dark);
+      painter.extend(egui::Shape::dashed_line_with_offset(&[a, b], light, &[4.0], &[4.0], offset));
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(120));
+  }
+
   /// The brush outline under the pointer: where and how big the brush (or the eraser, also when
   /// the pen is flipped) paints at full pressure, turned like the tip. Tiny brushes get a cross.
   fn outline(&self, ui: &egui::Ui, rect: egui::Rect, view: View, over: bool) {
@@ -467,6 +583,9 @@ impl Canvas {
     let tool = if pen.eraser { Tool::Eraser } else { self.tools.tool };
     let busy = self.tools.picking || self.tools.hand || alt || pen.barrel || self.tools.guides.editing || self.shape_edit || dragging_color;
     let Some(at) = ui.input(|i| i.pointer.hover_pos()).filter(|&p| rect.contains(p)) else { return };
+    if tool == Tool::Select && over && !busy {
+      ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    }
     if busy || !matches!(tool, Tool::Brush | Tool::Smudge | Tool::Eraser) || !over {
       return;
     }
@@ -651,9 +770,61 @@ impl egui_wgpu::CallbackTrait for CanvasCallback {
   }
 }
 
+/// The selection's edge as straight runs in canvas pixels, traced on a grid of at most 1024
+/// cells a side (a cell is inside when its corner pixel is at least half selected).
+fn trace(selection: &Selection) -> Vec<[Pos2; 2]> {
+  let (w, h) = (selection.width(), selection.height());
+  let step = w.max(h).div_ceil(1024).max(1);
+  let (gw, gh) = (w.div_ceil(step), h.div_ceil(step));
+  let inside = |cx: i64, cy: i64| cx >= 0 && cy >= 0 && cx < gw as i64 && cy < gh as i64 && selection.at(cx as u32 * step, cy as u32 * step) >= 128;
+  let at = |x: i64, y: i64| Pos2::new((x as f32 * step as f32).min(w as f32), (y as f32 * step as f32).min(h as f32));
+  let mut runs = Vec::new();
+  // Vertical edges between columns cx-1 and cx, merged along y; then horizontal ones.
+  for cx in 0..=gw as i64 {
+    let mut start = None;
+    for cy in 0..=gh as i64 {
+      let edge = cy < gh as i64 && inside(cx - 1, cy) != inside(cx, cy);
+      match (edge, start) {
+        (true, None) => start = Some(cy),
+        (false, Some(from)) => {
+          runs.push([at(cx, from), at(cx, cy)]);
+          start = None;
+        }
+        _ => {}
+      }
+    }
+  }
+  for cy in 0..=gh as i64 {
+    let mut start = None;
+    for cx in 0..=gw as i64 {
+      let edge = cx < gw as i64 && inside(cx, cy - 1) != inside(cx, cy);
+      match (edge, start) {
+        (true, None) => start = Some(cx),
+        (false, Some(from)) => {
+          runs.push([at(from, cy), at(cx, cy)]);
+          start = None;
+        }
+        _ => {}
+      }
+    }
+  }
+  runs
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn a_rectangle_traces_to_four_edges() {
+    let mut doc = Document::new(100, 80);
+    doc.select_shape(&SelectShape::Rectangle((10.0, 20.0), (60.0, 50.0)), SelectMode::Replace);
+    let mut runs = trace(doc.selection().unwrap());
+    runs.sort_by(|a, b| (a[0].x, a[0].y).partial_cmp(&(b[0].x, b[0].y)).unwrap());
+    assert_eq!(runs.len(), 4, "{runs:?}");
+    assert!(runs.contains(&[Pos2::new(10.0, 20.0), Pos2::new(10.0, 50.0)]), "left edge {runs:?}");
+    assert!(runs.contains(&[Pos2::new(10.0, 20.0), Pos2::new(60.0, 20.0)]), "top edge {runs:?}");
+  }
 
   fn close(a: Pos2, b: Pos2) -> bool {
     (a - b).length() < 1e-3

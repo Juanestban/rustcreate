@@ -19,6 +19,17 @@ pub enum Tool {
   /// Paint bucket.
   Fill,
   Gradient,
+  Select,
+}
+
+/// How the selection tool selects (M, L, W in Photoshop).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectKind {
+  Rectangle,
+  Ellipse,
+  Lasso,
+  /// Magic wand: the area of similar color, with the bucket's threshold.
+  Wand,
 }
 
 impl Tool {
@@ -55,6 +66,9 @@ pub struct Tools {
   pub guides: crate::guides::Guides,
   /// Colors painted with, newest first.
   pub recent: Vec<[u8; 3]>,
+  pub select_kind: SelectKind,
+  /// Feather radius in canvas pixels for the Feather button.
+  pub feather: f32,
 }
 
 impl Default for Tools {
@@ -73,6 +87,8 @@ impl Default for Tools {
       quickshape: true,
       guides: Default::default(),
       recent: Vec::new(),
+      select_kind: SelectKind::Rectangle,
+      feather: 10.0,
     }
   }
 }
@@ -134,6 +150,13 @@ impl Tools {
     if input.consume_key(Modifiers::NONE, Key::I) {
       self.picking = !self.picking;
     }
+    // M: rectangle, again for the ellipse; L: lasso; W: magic wand.
+    for (key, kind) in [(Key::M, SelectKind::Rectangle), (Key::L, SelectKind::Lasso), (Key::W, SelectKind::Wand)] {
+      if input.consume_key(Modifiers::NONE, key) {
+        let again = self.tool == Tool::Select && self.select_kind == SelectKind::Rectangle && kind == SelectKind::Rectangle;
+        (self.tool, self.hand, self.select_kind) = (Tool::Select, false, if again { SelectKind::Ellipse } else { kind });
+      }
+    }
     if input.consume_key(Modifiers::NONE, Key::H) {
       self.hand = !self.hand;
     }
@@ -165,6 +188,15 @@ impl Tools {
     }
     if painting {
       return;
+    }
+    if input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::I) {
+      doc.invert_selection();
+    }
+    if input.consume_key(Modifiers::COMMAND, Key::A) {
+      doc.select_all();
+    }
+    if input.consume_key(Modifiers::COMMAND, Key::D) {
+      doc.deselect();
     }
     // Check the longer combinations first: consume_key ignores extra Shift/Alt on Ctrl+Z.
     if input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || input.consume_key(Modifiers::COMMAND, Key::Y) {

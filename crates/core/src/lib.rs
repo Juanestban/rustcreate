@@ -7,6 +7,7 @@ mod fill;
 mod guide;
 mod history;
 mod import;
+mod selection;
 mod shape;
 mod swatches;
 pub mod tip;
@@ -21,6 +22,7 @@ pub use guide::Symmetry;
 pub use history::History;
 use history::Snapshot;
 pub use import::{BrushImage, Imported, export_brushes, import_abr, import_brushset, load_brush_image};
+pub use selection::{SelectMode, SelectShape, Selection};
 pub use shape::Shape;
 pub use swatches::{SwatchFormat, Swatches, export_swatches, import_swatches};
 pub use tip::{Grain, Tip};
@@ -118,6 +120,8 @@ pub struct Document {
   /// The app's drawing guide for this canvas, saved in the file as is. Core does not read it;
   /// changing it is not an undoable edit.
   pub guide: Option<serde_json::Value>,
+  /// What painting is limited to; `None` = the whole canvas. Not saved in the file.
+  selection: Option<Selection>,
 }
 
 impl Document {
@@ -136,6 +140,7 @@ impl Document {
       history,
       revision: 0,
       guide: None,
+      selection: None,
     };
     let first = doc.new_layer();
     doc.layers.push(first);
@@ -168,7 +173,7 @@ impl Document {
   /// changing a layer property through [`Document::layer_mut`]; the layer operations below
   /// call it themselves.
   pub fn checkpoint(&mut self) {
-    self.history.push(Snapshot::new(self.layers.clone(), self.active));
+    self.history.push(Snapshot::new(self.layers.clone(), self.active, self.selection.clone()));
     self.revision += 1;
   }
 
@@ -194,13 +199,14 @@ impl Document {
   }
 
   fn restore(&mut self, step: impl FnOnce(&mut History, Snapshot) -> Result<Snapshot, Snapshot>) -> bool {
-    let current = Snapshot::new(std::mem::take(&mut self.layers), self.active);
+    let current = Snapshot::new(std::mem::take(&mut self.layers), self.active, self.selection.take());
     let (state, moved) = match step(&mut self.history, current) {
       Ok(state) => (state, true),
       Err(current) => (current, false),
     };
     self.layers = state.layers;
     self.active = state.active;
+    self.selection = state.selection;
     self.revision += u64::from(moved);
     moved
   }

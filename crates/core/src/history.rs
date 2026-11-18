@@ -5,7 +5,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::{Layer, TILE_BYTES};
+use crate::{Layer, Selection, TILE_BYTES};
 
 pub const DEFAULT_STEPS: usize = 250;
 pub const DEFAULT_MEMORY: usize = 2 * 1024 * 1024 * 1024;
@@ -14,13 +14,16 @@ pub const DEFAULT_MEMORY: usize = 2 * 1024 * 1024 * 1024;
 pub(crate) struct Snapshot {
   pub layers: Vec<Layer>,
   pub active: usize,
+  // shortcut: the selection mask is not counted in `bytes`; it is one byte per pixel at most
+  // per step, count it if long selection sessions hit the memory cap.
+  pub selection: Option<Selection>,
   /// Bytes of tiles only this snapshot holds, measured once the step is done.
   bytes: usize,
 }
 
 impl Snapshot {
-  pub fn new(layers: Vec<Layer>, active: usize) -> Self {
-    Self { layers, active, bytes: 0 }
+  pub fn new(layers: Vec<Layer>, active: usize, selection: Option<Selection>) -> Self {
+    Self { layers, active, selection, bytes: 0 }
   }
 
   // shortcut: counts tiles nothing else references when measured; a tile later freed by an

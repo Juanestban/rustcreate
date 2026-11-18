@@ -16,9 +16,10 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `R` | Rotate view (`Esc` resets rotation) | ✅ |
 | `S` | Smudge | ✅ |
 | `G` | Paint bucket; again for the gradient | ✅ |
-| `M` | Marquee selection | 🕓 |
-| `L` | Lasso selection | 🕓 |
-| `W` | Magic wand / quick selection | 🕓 |
+| `M` | Marquee selection (again: ellipse) | ✅ |
+| `L` | Lasso selection | ✅ |
+| `W` | Magic wand | ✅ |
+| `Shift` / `Alt` + selection drag | Add to / subtract from the selection | ✅ |
 | `V` | Move | 🕓 |
 | `T` | Text | 🕓 |
 | `C` | Crop | 🕓 |
@@ -44,7 +45,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Ctrl+Alt+Z` | Step backward (Photoshop legacy) | ✅ |
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / copy / paste | 🕓 |
 | `Ctrl+T` | Free transform | 🕓 |
-| `Ctrl+A` / `Ctrl+D` / `Ctrl+Shift+I` | Select all / deselect / invert selection | 🕓 |
+| `Ctrl+A` / `Ctrl+D` / `Ctrl+Shift+I` | Select all / deselect / invert selection | ✅ |
 | `Backspace` / `Delete` | Clear layer (or selection) | ✅ |
 | `Alt+Backspace` | Fill with primary color | ✅ |
 

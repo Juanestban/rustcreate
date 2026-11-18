@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::guide::Mirror;
 use crate::tip::{self, Grain, Tip};
-use crate::{Document, Symmetry, TILE};
+use crate::{Document, Selection, Symmetry, TILE};
 
 /// Serializable for saved brush libraries; fields missing from older files take the defaults.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -310,6 +310,8 @@ pub struct Stroke {
   points: Vec<(f32, f32)>,
   /// Symmetry: every dab is also stamped through each of these.
   mirrors: Vec<Mirror>,
+  /// The selection when the stroke began: paint only lands inside it.
+  selection: Option<Selection>,
 }
 
 impl Document {
@@ -344,6 +346,7 @@ impl Document {
       points: Vec::new(),
       mirrors: Vec::new(),
       motion: MotionFilter::default(),
+      selection: self.selection.clone(),
     })
   }
 
@@ -653,7 +656,7 @@ impl Stroke {
             let c = &mut tile.coverage[i];
             let previous = *c;
             *c = if self.brush.buildup { *c + (1.0 - *c) * dab } else { c.max(dab) };
-            let alpha = *c * opacity;
+            let alpha = *c * opacity * Selection::weight(self.selection.as_ref(), px, py);
             // Wet: each dab tints the stroke's color by its share of the coverage.
             let color = if wet {
               let paint = &mut tile.paint[i];
@@ -715,7 +718,7 @@ impl Stroke {
         let pixels = layer.tile_mut(tx, ty);
         for py in rows.clone() {
           for px in cols.clone() {
-            let weight = Self::shape(&self.brush, textures, &d, radius, px, py) * strength;
+            let weight = Self::shape(&self.brush, textures, &d, radius, px, py) * strength * Selection::weight(self.selection.as_ref(), px, py);
             if weight <= 0.0 {
               continue;
             }

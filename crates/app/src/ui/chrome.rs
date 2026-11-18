@@ -14,7 +14,7 @@ use crate::guides::Kind;
 use crate::i18n::Language;
 use crate::library::{CATEGORIES, MINE, Name};
 use crate::settings::Theme;
-use crate::tools::Tool;
+use crate::tools::{SelectKind, Tool};
 use crate::{App, Pending};
 use rustcreate_core::{GradientKind, Symmetry};
 
@@ -25,6 +25,7 @@ pub enum Popover {
   Fill,
   Layers,
   Color,
+  Select,
 }
 
 const BLEND_MODES: [(BlendMode, &str); 9] = [
@@ -52,7 +53,14 @@ impl App {
           self.popover_button(ui, Icon::Actions, Popover::Actions, "ui-actions");
           ui.add_space(8.0);
           icons::button(ui, Icon::Adjustments, false, false, &format!("{} · {soon}", self.i18n.tr("ui-adjustments")));
-          icons::button(ui, Icon::Selection, false, false, &format!("{} · {soon}", self.i18n.tr("ui-selection")));
+          // Selection: picks the tool; clicking it again opens its options.
+          let selecting = self.canvas.tools.tool == Tool::Select;
+          if icons::button(ui, Icon::Selection, selecting, true, &self.i18n.tr("ui-selection")).clicked() {
+            if selecting {
+              self.toggle(Popover::Select);
+            }
+            (self.canvas.tools.tool, self.canvas.tools.hand) = (Tool::Select, false);
+          }
           icons::button(ui, Icon::Transform, false, false, &format!("{} · {soon}", self.i18n.tr("ui-transform")));
 
           ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -175,6 +183,7 @@ impl App {
           Popover::Actions => self.actions_panel(ui),
           Popover::Brushes => self.brushes_panel(ui),
           Popover::Fill => self.fill_panel(ui),
+          Popover::Select => self.select_panel(ui),
           Popover::Layers => self.layers_panel(ui),
           Popover::Color => self.color_panel(ui),
         }
@@ -315,6 +324,51 @@ impl App {
       ui.selectable_value(&mut tools.gradient, GradientKind::Radial, i18n.tr("ui-gradient-radial"));
     });
     ui.checkbox(&mut tools.gradient_to_clear, i18n.tr("ui-gradient-to-clear"));
+  }
+
+  /// The selection tool's kind and the commands on the current selection.
+  fn select_panel(&mut self, ui: &mut egui::Ui) {
+    self.title(ui, "ui-selection");
+    let tools = &mut self.canvas.tools;
+    let i18n = &self.i18n;
+    ui.horizontal_wrapped(|ui| {
+      for (kind, id) in [
+        (SelectKind::Rectangle, "ui-select-rectangle"),
+        (SelectKind::Ellipse, "ui-select-ellipse"),
+        (SelectKind::Lasso, "ui-select-lasso"),
+        (SelectKind::Wand, "ui-select-wand"),
+      ] {
+        ui.selectable_value(&mut tools.select_kind, kind, i18n.tr(id));
+      }
+    });
+    if tools.select_kind == SelectKind::Wand {
+      ui.horizontal(|ui| {
+        ui.label(i18n.tr("ui-fill-threshold"));
+        ui.add(egui::Slider::new(&mut tools.fill_threshold, 0.0..=1.0).custom_formatter(|v, _| format!("{:.0} %", v * 100.0)));
+      });
+      ui.checkbox(&mut tools.fill_all_layers, i18n.tr("ui-fill-all-layers"));
+    }
+    ui.label(RichText::new(i18n.tr("ui-select-help")).small().color(theme::palette(ui).muted));
+    ui.separator();
+    let doc = &mut self.doc;
+    let selected = doc.selection().is_some();
+    ui.horizontal_wrapped(|ui| {
+      if ui.button(i18n.tr("ui-select-all")).clicked() {
+        doc.select_all();
+      }
+      if ui.add_enabled(selected, egui::Button::new(i18n.tr("ui-select-none"))).clicked() {
+        doc.deselect();
+      }
+      if ui.add_enabled(selected, egui::Button::new(i18n.tr("ui-select-invert"))).clicked() {
+        doc.invert_selection();
+      }
+    });
+    ui.horizontal(|ui| {
+      ui.add(egui::Slider::new(&mut tools.feather, 1.0..=200.0).logarithmic(true).suffix(" px").fixed_decimals(0));
+      if ui.add_enabled(selected, egui::Button::new(i18n.tr("ui-select-feather"))).clicked() {
+        doc.feather_selection(tools.feather);
+      }
+    });
   }
 
   /// The brush library: categories on the left, the category's brushes on the right with
