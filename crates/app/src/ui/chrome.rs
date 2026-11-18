@@ -61,7 +61,11 @@ impl App {
             }
             (self.canvas.tools.tool, self.canvas.tools.hand) = (Tool::Select, false);
           }
-          icons::button(ui, Icon::Transform, false, false, &format!("{} · {soon}", self.i18n.tr("ui-transform")));
+          // Free Transform: a second click applies it.
+          let transforming = self.canvas.transforming();
+          if icons::button(ui, Icon::Transform, transforming, true, &self.i18n.tr("ui-transform")).clicked() {
+            if transforming { self.canvas.end_transform(&mut self.doc, true) } else { self.canvas.start_transform(&mut self.doc) }
+          }
 
           ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -91,6 +95,8 @@ impl App {
   }
 
   fn toggle(&mut self, popover: Popover) {
+    // Panels change the document (layers, fills): a transform in progress is applied first.
+    self.canvas.end_transform(&mut self.doc, true);
     self.popover = if self.popover == Some(popover) { None } else { Some(popover) };
     self.brush_category = None;
   }
@@ -153,8 +159,13 @@ impl App {
           opacity.on_hover_text(self.i18n.tr_args("ui-opacity", &[("opacity", (percent.round() as i64).into())]));
           ui.add_space(18.0);
           let (can_undo, can_redo) = (self.doc.history().can_undo(), self.doc.history().can_redo());
+          // Undo while transforming cancels the transform, like Ctrl+Z does.
           if icons::button(ui, Icon::Undo, false, can_undo, &self.i18n.tr("ui-undo")).clicked() {
-            self.doc.undo();
+            if self.canvas.transforming() {
+              self.canvas.end_transform(&mut self.doc, false)
+            } else {
+              self.doc.undo();
+            }
           }
           if icons::button(ui, Icon::Redo, false, can_redo, &self.i18n.tr("ui-redo")).clicked() {
             self.doc.redo();

@@ -11,6 +11,7 @@ mod selection;
 mod shape;
 mod swatches;
 pub mod tip;
+mod transform;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -26,6 +27,7 @@ pub use selection::{SelectMode, SelectShape, Selection};
 pub use shape::Shape;
 pub use swatches::{SwatchFormat, Swatches, export_swatches, import_swatches};
 pub use tip::{Grain, Tip};
+pub use transform::{Affine, IDENTITY, Transform};
 
 /// Tile side in pixels.
 pub const TILE: u32 = 256;
@@ -81,6 +83,15 @@ impl Layer {
   pub fn tile_mut(&mut self, tx: u32, ty: u32) -> &mut [u8] {
     self.dirty.insert((tx, ty));
     Arc::make_mut(self.tiles.entry((tx, ty)).or_insert_with(|| Arc::from(vec![0; TILE_BYTES])))
+  }
+
+  /// Puts a tile back (or removes it) as a whole, for operations that redraw from a saved state.
+  pub(crate) fn set_tile(&mut self, key: (u32, u32), tile: Option<Tile>) {
+    self.dirty.insert(key);
+    match tile {
+      Some(tile) => self.tiles.insert(key, tile),
+      None => self.tiles.remove(&key),
+    };
   }
 
   /// Coordinates of the painted tiles.
@@ -196,6 +207,17 @@ impl Document {
 
   pub fn redo(&mut self) -> bool {
     self.restore(|history, current| history.redo(current))
+  }
+
+  /// Goes back to the state before the last `checkpoint` and forgets that step, as if the
+  /// change never happened (a cancelled transform).
+  pub(crate) fn rollback(&mut self) {
+    if let Some(state) = self.history.pop() {
+      self.layers = state.layers;
+      self.active = state.active;
+      self.selection = state.selection;
+      self.revision = self.revision.saturating_sub(1);
+    }
   }
 
   fn restore(&mut self, step: impl FnOnce(&mut History, Snapshot) -> Result<Snapshot, Snapshot>) -> bool {

@@ -89,6 +89,11 @@ impl History {
     Ok(previous)
   }
 
+  /// Drops the last step without making it redoable, for an operation that was cancelled.
+  pub(crate) fn pop(&mut self) -> Option<Snapshot> {
+    self.undo.pop_back()
+  }
+
   pub(crate) fn redo(&mut self, current: Snapshot) -> Result<Snapshot, Snapshot> {
     let Some(next) = self.redo.pop() else { return Err(current) };
     self.undo.push_back(current);

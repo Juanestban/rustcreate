@@ -159,6 +159,8 @@ impl App {
 
   /// Runs `action` now, or first asks to save unsaved changes.
   pub(crate) fn request(&mut self, action: Pending) {
+    // A transform in progress is applied first, so it is saved or asked about like any edit.
+    self.canvas.end_transform(&mut self.doc, true);
     if self.dirty() { self.confirm = Some(action) } else { self.perform(action) }
   }
 
@@ -218,6 +220,7 @@ impl App {
 
   /// Saves to the current file, or asks where. Returns whether it saved.
   pub(crate) fn save(&mut self, choose: bool) -> bool {
+    self.canvas.end_transform(&mut self.doc, true);
     let path = match &self.path {
       Some(path) if !choose => path.clone(),
       _ => {
@@ -241,6 +244,7 @@ impl App {
   }
 
   pub(crate) fn export_png(&mut self) {
+    self.canvas.end_transform(&mut self.doc, true);
     let dialog = rfd::FileDialog::new().add_filter("PNG", &["png"]).set_file_name(format!("{}.png", self.name()));
     if let Some(path) = dialog.save_file()
       && let Err(error) = self.doc.export_png(&path)
@@ -392,7 +396,7 @@ impl eframe::App for App {
     let keys = !ctx.egui_wants_keyboard_input() && self.confirm.is_none();
     let render_state = self.render_state.clone();
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(ui.visuals().extreme_bg_color)).show(ui, |ui| {
-      self.canvas.show(ui, &render_state, &mut self.doc, keys);
+      self.canvas.show(ui, &render_state, &mut self.doc, keys, &self.i18n);
     });
     if !self.hidden {
       self.popovers(&ctx);

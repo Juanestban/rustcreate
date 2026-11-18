@@ -3,7 +3,7 @@
 
 use eframe::egui::{self, Event, Key, Modifiers, Pos2, Rect, Vec2, vec2};
 use eframe::egui_wgpu::{self, wgpu};
-use rustcreate_core::{Document, Gradient, SelectMode, SelectShape, Selection, Shape, Stroke};
+use rustcreate_core::{Affine, Document, Gradient, SelectMode, SelectShape, Selection, Shape, Stroke, Transform};
 
 /// QuickShape: how long the pointer must rest, and how far (points) it may drift meanwhile.
 const HOLD_SECONDS: f64 = 0.6;
@@ -111,6 +111,58 @@ pub struct Canvas {
   /// The selection's outline for the marching ants, in canvas pixels, and the mask it was
   /// traced from (by address), so it is only traced again when the selection changes.
   ants: (usize, Vec<[Pos2; 2]>),
+  /// Free Transform in progress (Ctrl+T).
+  transform: Option<Free>,
+}
+
+/// What a Free Transform drag holds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Grab {
+  Move,
+  Rotate,
+  /// A box handle: -1, 0 or 1 along each axis (0 = the middle of a side).
+  Handle(f32, f32),
+}
+
+/// A Free Transform: the lifted pixels and how they are moved, scaled and turned around the
+/// center of what was lifted.
+pub(crate) struct Free {
+  lifted: Transform,
+  center: Pos2,
+  half: Vec2,
+  offset: Vec2,
+  /// Negative to flip.
+  scale: Vec2,
+  angle: f32,
+  /// The drag: what it holds, where it started (canvas) and the state then.
+  drag: Option<(Grab, Pos2, (Vec2, Vec2, f32))>,
+}
+
+impl Free {
+  fn matrix(&self) -> Affine {
+    let (sin, cos) = self.angle.sin_cos();
+    let (a, b, c, d) = (cos * self.scale.x, -sin * self.scale.y, sin * self.scale.x, cos * self.scale.y);
+    let to = self.center + self.offset;
+    [a, b, c, d, to.x - (a * self.center.x + b * self.center.y), to.y - (c * self.center.x + d * self.center.y)]
+  }
+
+  /// A point of the box, in units of its half size from the center (-1..=1), on the canvas.
+  fn point(&self, hx: f32, hy: f32) -> Pos2 {
+    let local = vec2(hx * self.half.x * self.scale.x, hy * self.half.y * self.scale.y);
+    self.center + self.offset + rotate(local, self.angle)
+  }
+
+  /// The pointer at canvas point `p` relative to the box, unturned and unscaled.
+  fn local(&self, p: Pos2) -> Vec2 {
+    rotate(p - (self.center + self.offset), -self.angle)
+  }
+
+  const HANDLES: [(f32, f32); 8] = [(-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, 0.0)];
+}
+
+fn rotate(v: Vec2, angle: f32) -> Vec2 {
+  let (sin, cos) = angle.sin_cos();
+  vec2(v.x * cos - v.y * sin, v.x * sin + v.y * cos)
 }
 
 /// A ring by the pointer: the color under it on top, the one before picking below.
@@ -154,6 +206,7 @@ impl Canvas {
       drop: None,
       selecting: None,
       ants: (0, Vec::new()),
+      transform: None,
     }
   }
 
@@ -165,7 +218,7 @@ impl Canvas {
 
   /// Draws the canvas filling `ui`, after handling painting, view gestures and shortcuts.
   /// `keys` is false while a text field has the keyboard.
-  pub fn show(&mut self, ui: &mut egui::Ui, render_state: &egui_wgpu::RenderState, doc: &mut Document, keys: bool) {
+  pub fn show(&mut self, ui: &mut egui::Ui, render_state: &egui_wgpu::RenderState, doc: &mut Document, keys: bool, i18n: &crate::i18n::I18n) {
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
     let canvas = vec2(doc.width as f32, doc.height as f32);
     let view = self.view.get_or_insert_with(|| View::fit(rect.size(), canvas));
@@ -180,7 +233,21 @@ impl Canvas {
     {
       self.end_shape(doc);
     }
-    let painting = self.stroke.is_some() || self.gradient.is_some();
+    if self.transform.is_some() && keys {
+      // While transforming only these keys count: the document is in the middle of a change.
+      let (enter, escape) = ui.input_mut(|i| {
+        let enter = i.consume_key(Modifiers::NONE, Key::Enter) || i.consume_key(Modifiers::COMMAND, Key::T);
+        (enter, i.consume_key(Modifiers::NONE, Key::Escape) || i.consume_key(Modifiers::COMMAND, Key::Z))
+      });
+      if enter {
+        self.end_transform(doc, true);
+      } else if escape {
+        self.end_transform(doc, false);
+      }
+    } else if keys && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::T)) && self.stroke.is_none() && self.gradient.is_none() {
+      self.start_transform(doc);
+    }
+    let painting = self.stroke.is_some() || self.gradient.is_some() || self.transform.is_some();
     if keys {
       ui.input_mut(|input| self.tools.shortcuts(input, doc, painting));
     }
@@ -194,6 +261,7 @@ impl Canvas {
     let to_screen = |p: Pos2| view.to_screen(rect.center(), canvas, p);
     self.tools.guides.draw(&ui.painter_at(rect), canvas, crate::ui::theme::ACCENT.gamma_multiply(0.75), to_screen);
     self.draw_selection(ui, rect, doc, to_screen);
+    self.draw_transform(ui, rect, doc, to_screen, i18n);
     if let Some((at, before)) = self.loupe {
       loupe(ui.painter(), at, self.tools.primary, before);
     }
@@ -287,6 +355,11 @@ impl Canvas {
     });
     let shift_down = shift && !self.shift;
     self.shift = shift;
+    if self.transform.is_some() {
+      // A press on the transform bar (above the canvas) is not a drag.
+      self.transform_input(ui, &to_canvas, doc, (pressed && response.contains_pointer(), released), shift, origin, view_drag);
+      return;
+    }
     if self.shape_edit {
       self.edit_shape(ui, &to_canvas, doc, pressed, released, shift_down, origin);
       return;
@@ -475,6 +548,156 @@ impl Canvas {
     }
   }
 
+  /// Starts a Free Transform of the active layer's selection (or all of it). Nothing happens on a
+  /// locked or empty layer.
+  pub fn start_transform(&mut self, doc: &mut Document) {
+    if self.transform.is_some() || self.stroke.is_some() || self.gradient.is_some() {
+      return;
+    }
+    let Some(lifted) = doc.begin_transform() else { return };
+    let (l, t, r, b) = lifted.bounds();
+    let (center, half) = (Pos2::new((l + r) / 2.0, (t + b) / 2.0), vec2((r - l) / 2.0, (b - t) / 2.0));
+    self.transform = Some(Free { lifted, center, half, offset: Vec2::ZERO, scale: Vec2::splat(1.0), angle: 0.0, drag: None });
+  }
+
+  pub fn transforming(&self) -> bool {
+    self.transform.is_some()
+  }
+
+  /// Applies the transform, or puts everything back.
+  pub fn end_transform(&mut self, doc: &mut Document, apply: bool) {
+    let Some(free) = self.transform.take() else { return };
+    if apply {
+      let m = free.matrix();
+      free.lifted.finish(doc, m);
+    } else {
+      free.lifted.cancel(doc);
+    }
+  }
+
+  /// Flips, quarter turns and reset from the transform bar.
+  fn adjust_transform(&mut self, doc: &mut Document, change: impl FnOnce(&mut Free)) {
+    if let Some(free) = &mut self.transform {
+      change(free);
+      let m = free.matrix();
+      free.lifted.update(doc, m);
+    }
+  }
+
+  /// Free Transform drags: inside the box moves, a handle scales (corners keep the proportions
+  /// unless Shift is held), outside the box turns (Shift: 15° steps).
+  #[allow(clippy::too_many_arguments)]
+  fn transform_input(
+    &mut self,
+    ui: &egui::Ui,
+    to_canvas: &impl Fn(Pos2) -> Pos2,
+    doc: &mut Document,
+    (pressed, released): (bool, bool),
+    shift: bool,
+    origin: Option<Pos2>,
+    view_drag: bool,
+  ) {
+    let Some(free) = &mut self.transform else { return };
+    if pressed
+      && !view_drag
+      && let Some(origin) = origin
+    {
+      let p = to_canvas(origin);
+      // 10 points around the pointer, in canvas pixels.
+      let reach = (to_canvas(origin + vec2(10.0, 0.0)) - p).length();
+      let handle = Free::HANDLES.iter().find(|&&(hx, hy)| free.point(hx, hy).distance(p) < reach);
+      let local = free.local(p);
+      let inside = local.x.abs() <= (free.half.x * free.scale.x).abs() && local.y.abs() <= (free.half.y * free.scale.y).abs();
+      let grab = match handle {
+        Some(&(hx, hy)) => Grab::Handle(hx, hy),
+        None if inside => Grab::Move,
+        None => Grab::Rotate,
+      };
+      free.drag = Some((grab, p, (free.offset, free.scale, free.angle)));
+    }
+    let Some((grab, start, (offset, scale, angle))) = free.drag else { return };
+    let Some(p) = ui.input(|i| i.pointer.interact_pos()).map(to_canvas) else { return };
+    let before = (free.offset, free.scale, free.angle);
+    match grab {
+      Grab::Move => free.offset = offset + (p - start),
+      Grab::Rotate => {
+        let pivot = free.center + offset;
+        let turned = angle + (p - pivot).angle() - (start - pivot).angle();
+        let step = 15f32.to_radians();
+        free.angle = if shift { (turned / step).round() * step } else { turned };
+      }
+      Grab::Handle(hx, hy) => {
+        let local = rotate(p - (free.center + offset), -angle);
+        let corner = vec2(hx * free.half.x * scale.x, hy * free.half.y * scale.y);
+        free.scale = if hx != 0.0 && hy != 0.0 && !shift {
+          // Proportional: how far along its diagonal the corner was pulled.
+          scale * (local.dot(corner) / corner.length_sq().max(1e-6))
+        } else {
+          let axis = |h: f32, half: f32, now: f32, old: f32| if h == 0.0 || half <= 0.0 { old } else { now / (h * half) };
+          vec2(axis(hx, free.half.x, local.x, scale.x), axis(hy, free.half.y, local.y, scale.y))
+        };
+      }
+    }
+    // Redraw only when something moved: big layers take a while.
+    if (free.offset, free.scale, free.angle) != before {
+      let m = free.matrix();
+      free.lifted.update(doc, m);
+    }
+    if released {
+      free.drag = None;
+    }
+  }
+
+  /// The transform box, its handles and the bar with flips, turns, reset, cancel and done.
+  fn draw_transform(&mut self, ui: &egui::Ui, rect: Rect, doc: &mut Document, to_screen: impl Fn(Pos2) -> Pos2, i18n: &crate::i18n::I18n) {
+    let Some(free) = &self.transform else { return };
+    let painter = ui.painter_at(rect);
+    let corners: Vec<Pos2> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|&(x, y)| to_screen(free.point(x, y))).collect();
+    painter.add(egui::Shape::closed_line(corners, egui::Stroke::new(1.5, crate::ui::theme::ACCENT)));
+    for (hx, hy) in Free::HANDLES {
+      let at = to_screen(free.point(hx, hy));
+      painter.rect(
+        Rect::from_center_size(at, Vec2::splat(9.0)),
+        2.0,
+        egui::Color32::WHITE,
+        egui::Stroke::new(1.5, crate::ui::theme::ACCENT),
+        egui::StrokeKind::Middle,
+      );
+    }
+    let mut action = None;
+    egui::Area::new(egui::Id::unique("transform-bar"))
+      .order(egui::Order::Foreground)
+      .pivot(egui::Align2::CENTER_BOTTOM)
+      .fixed_pos(rect.center_bottom() - vec2(0.0, 16.0))
+      .show(ui.ctx(), |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+          ui.horizontal(|ui| {
+            for (id, a) in [
+              ("ui-transform-flip-h", 0),
+              ("ui-transform-flip-v", 1),
+              ("ui-transform-rotate", 2),
+              ("ui-transform-reset", 3),
+              ("ui-transform-cancel", 4),
+              ("ui-transform-done", 5),
+            ] {
+              if ui.button(i18n.tr(id)).clicked() {
+                action = Some(a);
+              }
+            }
+          });
+        });
+      });
+    match action {
+      Some(0) => self.adjust_transform(doc, |f| f.scale.x = -f.scale.x),
+      Some(1) => self.adjust_transform(doc, |f| f.scale.y = -f.scale.y),
+      Some(2) => self.adjust_transform(doc, |f| f.angle += std::f32::consts::FRAC_PI_2),
+      Some(3) => self.adjust_transform(doc, |f| (f.offset, f.scale, f.angle) = (Vec2::ZERO, Vec2::splat(1.0), 0.0)),
+      Some(4) => self.end_transform(doc, false),
+      Some(5) => self.end_transform(doc, true),
+      _ => {}
+    }
+  }
+
   /// The selection tool: a drag draws a rectangle, ellipse or lasso, a click with the wand picks
   /// an area; Shift adds and Alt subtracts. A click without a drag deselects.
   fn select_input(
@@ -581,7 +804,14 @@ impl Canvas {
     let pen = crate::pen::buttons();
     let (alt, dragging_color) = ui.input(|i| (i.modifiers.alt, egui::DragAndDrop::has_any_payload(ui.ctx())));
     let tool = if pen.eraser { Tool::Eraser } else { self.tools.tool };
-    let busy = self.tools.picking || self.tools.hand || alt || pen.barrel || self.tools.guides.editing || self.shape_edit || dragging_color;
+    let busy = self.transform.is_some()
+      || self.tools.picking
+      || self.tools.hand
+      || alt
+      || pen.barrel
+      || self.tools.guides.editing
+      || self.shape_edit
+      || dragging_color;
     let Some(at) = ui.input(|i| i.pointer.hover_pos()).filter(|&p| rect.contains(p)) else { return };
     if tool == Tool::Select && over && !busy {
       ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);

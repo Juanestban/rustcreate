@@ -44,7 +44,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Ctrl+Shift+Z` / `Ctrl+Y` | Redo | ✅ |
 | `Ctrl+Alt+Z` | Step backward (Photoshop legacy) | ✅ |
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / copy / paste | 🕓 |
-| `Ctrl+T` | Free transform | 🕓 |
+| `Ctrl+T` | Free transform (Enter or Ctrl+T applies, Esc or Ctrl+Z cancels; Shift: free scale, 15° turns) | ✅ |
 | `Ctrl+A` / `Ctrl+D` / `Ctrl+Shift+I` | Select all / deselect / invert selection | ✅ |
 | `Backspace` / `Delete` | Clear layer (or selection) | ✅ |
 | `Alt+Backspace` | Fill with primary color | ✅ |
