@@ -71,12 +71,16 @@ pub enum Grain {
   Canvas,
   /// Fine, even speckle.
   Noise,
+  /// Big, soft billows: clouds and smoke.
+  Clouds,
+  /// Wavy bands, like light on water.
+  Ripples,
   /// An imported texture, by the id `register` gave it. No grain if it is not registered.
   Image(u32),
 }
 
 impl Grain {
-  pub const ALL: [Grain; 4] = [Grain::None, Grain::Paper, Grain::Canvas, Grain::Noise];
+  pub const ALL: [Grain; 6] = [Grain::None, Grain::Paper, Grain::Canvas, Grain::Noise, Grain::Clouds, Grain::Ripples];
 
   /// 0..=1 at canvas pixel (x, y); `scale` 1 = one texture pixel per canvas pixel.
   pub fn value(self, x: f32, y: f32, scale: f32) -> f32 {
@@ -90,6 +94,8 @@ impl Grain {
       Grain::Paper => Some(grain(0, paper)),
       Grain::Canvas => Some(grain(1, canvas)),
       Grain::Noise => Some(grain(2, speckle)),
+      Grain::Clouds => Some(grain(3, clouds)),
+      Grain::Ripples => Some(grain(4, ripples)),
       Grain::Image(id) => image(id, true),
     }
   }
@@ -146,7 +152,7 @@ fn mask(slot: usize, make: fn() -> Vec<f32>) -> &'static [f32] {
 }
 
 fn grain(slot: usize, make: fn() -> Vec<f32>) -> &'static [f32] {
-  static GRAINS: [OnceLock<Vec<f32>>; 3] = [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+  static GRAINS: [OnceLock<Vec<f32>>; 5] = [const { OnceLock::new() }; 5];
   GRAINS[slot].get_or_init(make)
 }
 
@@ -258,6 +264,28 @@ fn splatter() -> Vec<f32> {
 
 fn paper() -> Vec<f32> {
   (0..GRAIN_SIZE * GRAIN_SIZE).map(|i| (fractal(i % GRAIN_SIZE, i / GRAIN_SIZE, GRAIN_SIZE, 32, 4, 21) * 1.6 - 0.3).clamp(0.0, 1.0)).collect()
+}
+
+fn clouds() -> Vec<f32> {
+  (0..GRAIN_SIZE * GRAIN_SIZE)
+    .map(|i| {
+      let v = fractal(i % GRAIN_SIZE, i / GRAIN_SIZE, GRAIN_SIZE, 4, 5, 77);
+      // Stretched so there are clear gaps between the billows.
+      ((v - 0.35) * 2.2).clamp(0.0, 1.0)
+    })
+    .collect()
+}
+
+fn ripples() -> Vec<f32> {
+  (0..GRAIN_SIZE * GRAIN_SIZE)
+    .map(|i| {
+      let (x, y) = (i % GRAIN_SIZE, i / GRAIN_SIZE);
+      // Bands across, bent by noise; 4 whole periods keep the texture seamless.
+      let bend = fractal(x, y, GRAIN_SIZE, 4, 3, 91) * 6.0;
+      let t = y as f32 / GRAIN_SIZE as f32 * std::f32::consts::TAU * 4.0 + bend;
+      t.sin().abs().powf(0.6)
+    })
+    .collect()
 }
 
 fn canvas() -> Vec<f32> {

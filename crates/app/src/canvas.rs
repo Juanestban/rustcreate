@@ -188,6 +188,8 @@ impl Canvas {
     if let Some((at, before)) = self.loupe {
       loupe(ui.painter(), at, self.tools.primary, before);
     }
+    // Only where the canvas is on top (not under a popover or the Studio).
+    self.outline(ui, rect, view, response.contains_pointer());
     if let (Some((_, _, threshold)), Some(at)) = (self.drop, ui.input(|i| i.pointer.interact_pos())) {
       let text = format!("{:.0} %", threshold * 100.0);
       ui.painter().text(at + vec2(0.0, -28.0), egui::Align2::CENTER_BOTTOM, text, egui::FontId::proportional(15.0), egui::Color32::WHITE);
@@ -454,6 +456,46 @@ impl Canvas {
       } else {
         self.last_point = stroke.finish(doc);
       }
+    }
+  }
+
+  /// The brush outline under the pointer: where and how big the brush (or the eraser, also when
+  /// the pen is flipped) paints at full pressure, turned like the tip. Tiny brushes get a cross.
+  fn outline(&self, ui: &egui::Ui, rect: egui::Rect, view: View, over: bool) {
+    let pen = crate::pen::buttons();
+    let (alt, dragging_color) = ui.input(|i| (i.modifiers.alt, egui::DragAndDrop::has_any_payload(ui.ctx())));
+    let tool = if pen.eraser { Tool::Eraser } else { self.tools.tool };
+    let busy = self.tools.picking || self.tools.hand || alt || pen.barrel || self.tools.guides.editing || self.shape_edit || dragging_color;
+    let Some(at) = ui.input(|i| i.pointer.hover_pos()).filter(|&p| rect.contains(p)) else { return };
+    if busy || !matches!(tool, Tool::Brush | Tool::Smudge | Tool::Eraser) || !over {
+      return;
+    }
+    let brush = self.tools.brush_for(tool);
+    let radius = brush.size / 2.0 * view.zoom;
+    let painter = ui.painter_at(rect);
+    let (dark, light) = (egui::Stroke::new(3.0, egui::Color32::from_black_alpha(150)), egui::Stroke::new(1.0, egui::Color32::WHITE));
+    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+    if radius < 4.0 {
+      for d in [vec2(1.0, 0.0), vec2(0.0, 1.0)] {
+        for stroke in [dark, light] {
+          painter.line_segment([at - d * 6.0, at + d * 6.0], stroke);
+        }
+      }
+      return;
+    }
+    // A tip that follows the stroke has no fixed angle to show.
+    let angle = if brush.follow { 0.0 } else { brush.angle.to_radians() } + view.rotation;
+    let squash = brush.roundness.clamp(0.05, 1.0);
+    let (sin, cos) = angle.sin_cos();
+    let points: Vec<Pos2> = (0..64)
+      .map(|i| {
+        let t = i as f32 / 64.0 * std::f32::consts::TAU;
+        let (x, y) = (t.cos() * radius, t.sin() * radius * squash);
+        at + vec2(x * cos - y * sin, x * sin + y * cos)
+      })
+      .collect();
+    for stroke in [dark, light] {
+      painter.add(egui::Shape::closed_line(points.clone(), stroke));
     }
   }
 

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::settings::config_file;
 
 /// Category name tokens, in library order. The last one holds the user's brushes.
-pub const CATEGORIES: [&str; 8] = [
+pub const CATEGORIES: [&str; 9] = [
   "ui-cat-sketching",
   "ui-cat-inking",
   "ui-cat-painting",
@@ -20,6 +20,7 @@ pub const CATEGORIES: [&str; 8] = [
   "ui-cat-textures",
   "ui-cat-calligraphy",
   "ui-cat-abstract",
+  "ui-cat-elements",
   "ui-cat-mine",
 ];
 pub const MINE: usize = CATEGORIES.len() - 1;
@@ -73,7 +74,7 @@ struct Custom {
 fn builtins() -> Vec<Entry> {
   let base = Brush::ink();
   let flat = Brush { taper_start: 0.0, taper_end: 0.0, streamline: 0.1, ..base };
-  let list: [(&str, usize, Brush); 28] = [
+  let list: [(&str, usize, Brush); 33] = [
     ("graphite", 0, Brush { tilt_size: 0.7, tilt_flow: 0.5, ..Brush::pencil() }),
     ("soft-graphite", 0, Brush { tilt_size: 1.0, tilt_flow: 0.6, size: 10.0, hardness: 0.3, flow: 0.5, grain_depth: 0.75, ..Brush::pencil() }),
     ("technical-pencil", 0, Brush { size: 3.0, hardness: 1.0, flow: 0.9, pressure_size: 0.2, grain: Grain::None, ..Brush::pencil() }),
@@ -231,6 +232,81 @@ fn builtins() -> Vec<Entry> {
       6,
       Brush { size: 60.0, tip: Tip::Splatter, scatter: 1.0, size_jitter: 0.7, angle_jitter: 1.0, spacing: 0.6, pressure_size: 0.4, ..flat },
     ),
+    // Elements: soft, textured masses and streaks.
+    (
+      "clouds",
+      7,
+      Brush {
+        size: 200.0,
+        hardness: 0.0,
+        flow: 0.45,
+        scatter: 0.5,
+        size_jitter: 0.5,
+        spacing: 0.2,
+        pressure_flow: 0.8,
+        grain: Grain::Clouds,
+        grain_depth: 0.9,
+        grain_scale: 2.0,
+        ..Brush::airbrush()
+      },
+    ),
+    (
+      "smoke",
+      7,
+      Brush {
+        size: 120.0,
+        hardness: 0.0,
+        flow: 0.22,
+        scatter: 0.8,
+        size_jitter: 0.6,
+        spacing: 0.15,
+        grain: Grain::Clouds,
+        grain_depth: 1.0,
+        ..Brush::airbrush()
+      },
+    ),
+    (
+      "water",
+      7,
+      Brush {
+        size: 60.0,
+        wet_mix: 0.6,
+        charge: 0.85,
+        roundness: 0.5,
+        follow: true,
+        hardness: 0.4,
+        flow: 0.5,
+        grain: Grain::Ripples,
+        grain_depth: 0.6,
+        ..flat
+      },
+    ),
+    (
+      "flame",
+      7,
+      Brush {
+        size: 40.0,
+        follow: true,
+        roundness: 0.4,
+        hardness: 0.3,
+        flow: 0.7,
+        taper_start: 30.0,
+        taper_end: 80.0,
+        angle_jitter: 0.08,
+        size_jitter: 0.4,
+        scatter: 0.2,
+        spacing: 0.06,
+        grain: Grain::Clouds,
+        grain_depth: 0.5,
+        grain_scale: 0.5,
+        ..base
+      },
+    ),
+    (
+      "sparks",
+      7,
+      Brush { size: 9.0, hardness: 1.0, roundness: 0.35, follow: true, scatter: 1.5, size_jitter: 0.7, spacing: 0.7, pressure_size: 0.2, ..flat },
+    ),
   ];
   list.into_iter().map(|(id, category, brush)| Entry { id: id.to_owned(), name: Name::Token(token(id)), category, brush }).collect()
 }
@@ -266,6 +342,11 @@ fn token(id: &str) -> &'static str {
     "ribbon" => "ui-brush-ribbon",
     "stipple" => "ui-brush-stipple",
     "splatter" => "ui-brush-splatter",
+    "clouds" => "ui-brush-clouds",
+    "smoke" => "ui-brush-smoke",
+    "water" => "ui-brush-water",
+    "flame" => "ui-brush-flame",
+    "sparks" => "ui-brush-sparks",
     _ => "ui-brush-ink",
   }
 }

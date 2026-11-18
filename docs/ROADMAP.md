@@ -17,12 +17,13 @@
   gradient, QuickShape, the color disc with harmonies and palettes, drawing guides with symmetry,
   brush import from `.brushset` and `.abr`, ColorDrop and the eyedropper loupe,
   motion filtering, perspective guides, QuickShape editing and arcs, wet
-  mixing, pen tilt.
+  mixing, pen tilt, ColorDrop threshold, palette import/export, the guide saved in the file,
+  Calligraphy/Abstract/Elements brushes, `.rcbrushes` sets and the brush outline. **Phase 2 is
+  done.**
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Then: the rest of Phase 2 (Elements brushes,
-  reading the rest of imported brush settings) or
-  Phase 3.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 is done; Phase 3 starts
+  with selections.
 
 ## Phase 0 — Foundation
 
@@ -80,7 +81,10 @@
 - [x] Calligraphy and Abstract categories (8 new brushes); tip roundness for flat nibs and
       ribbons; rustcreate brush sets (`.rcbrushes`: every setting plus the images) exported per
       category and imported back, with values brought into range
-- [ ] Elements category (clouds, water, fire): needs its own original textures
+- [x] Elements category: Clouds, Smoke, Water, Flame, Sparks, with two new procedural grains
+      (clouds, ripples)
+- [x] Brush outline under the pointer: the brush, smudge or eraser size at the current zoom,
+      turned like a fixed-angle tip; a cross for tiny brushes
 - [x] Brush Studio: every parameter (shape, grain, dynamics, stroke), live preview painted by
       the engine, reset
 - [x] Procedurally generated tips (round, square, chalk, bristles, splatter) and grains (paper,
@@ -123,23 +127,31 @@
 - [x] Import brushes the user owns: Procreate `.brushset`/`.brush` (shape and grain images)
       and Photoshop `.abr` v6+ (sampled tips, raw or PackBits) into My brushes; imported images
       kept in `brush-images/` next to the settings
-- [ ] Read the rest of an imported brush's settings (Procreate `Brush.archive`, ABR
-      descriptors: spacing, dynamics…)
+- Skipped: reading the rest of an imported brush's settings (Procreate `Brush.archive`, ABR
+  descriptors). They are closed binary formats; imported brushes keep their shape and grain.
 
 ## Phase 3 — Photoshop-grade editing
 
-- [ ] Selections: marquee, lasso, magic wand, feather, invert, save
-- [ ] Transform: free, uniform, distort, warp, liquify
-- [ ] Layer masks and clipping masks, Alpha Lock
+The Photoshop features people use most, in this order:
+
+- [ ] Selections: rectangle, ellipse, lasso and magic wand; add/subtract with Shift/Alt; select
+      all, deselect, invert (Ctrl+A, Ctrl+D, Ctrl+Shift+I); feather; painting, fill and
+      gradient stay inside the selection
+- [ ] Free Transform (Ctrl+T): move, scale, rotate and flip the selection or the layer
+- [ ] Layer masks, clipping masks and Alpha Lock
+- [ ] Adjustments: Hue/Saturation (Ctrl+U), Levels (Ctrl+L), Curves (Ctrl+M),
+      Brightness/Contrast, Invert (Ctrl+I), Desaturate, live preview
+- [ ] Filters: Gaussian blur, Unsharp Mask, Add Noise
+- [ ] The remaining blend modes (Soft/Hard/Vivid/Linear Light, Difference, Exclusion, Hue,
+      Saturation, Color, Luminosity…)
+- [ ] Crop, Canvas Size and Image Size
 - [ ] Layer groups with their own blend mode and opacity
-- [ ] Adjustment layers: levels, curves, hue/saturation, color balance, gradient map
-- [ ] Filters: Gaussian/motion blur, sharpen, noise, chromatic aberration
 - [ ] Text layers
-- [ ] All blend modes (Soft/Hard/Vivid/Linear Light, Difference, Exclusion, Hue, Saturation,
-      Color, Luminosity…)
-- [ ] 16-bit channels and color management (Display P3, ICC)
-- [ ] PSD import/export, JPEG/WebP/TIFF export
-- [ ] Reference window, time-lapse recording
+- [ ] PSD import/export, JPEG/WebP export
+
+Later: adjustment layers, warp/distort and liquify, motion blur and chromatic aberration,
+16-bit channels and color management (Display P3, ICC), TIFF export, reference window,
+time-lapse recording.
 
 ## Phase 4 — Animation
 
