@@ -16,6 +16,7 @@ eframe = { version = "0.37", default-features = false, features = ["wgpu", "defa
 fluent-bundle = "0.16"
 png = "0.18"
 pollster = "0.4"
+raw-window-handle = "0.6"
 reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
 resvg = "0.45"
 rfd = "0.18"
@@ -25,6 +26,7 @@ sha2 = "0.10"
 sys-locale = "0.3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "time"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Controls", "Win32_UI_Input_Pointer", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 unic-langid = "0.9"
 # Same major as eframe's; DX12 first, Vulkan as fallback (DESIGN), Metal for macOS later.
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "dx12", "vulkan", "metal"] }

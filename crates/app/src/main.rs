@@ -2,6 +2,7 @@
 
 mod canvas;
 mod i18n;
+mod pen;
 mod tools;
 mod ui;
 mod update;
@@ -66,6 +67,7 @@ impl App {
     let doc = Document::new(NEW_CANVAS.0, NEW_CANVAS.1);
     let render_state = cc.wgpu_render_state.clone().expect("eframe runs on wgpu (ADR 0001)");
     let canvas = Canvas::new(&render_state, &doc);
+    pen::install(cc);
     ui::theme::install(&cc.egui_ctx);
     // shortcut: dark by default and not remembered until Settings exist.
     cc.egui_ctx.set_theme(egui::ThemePreference::Dark);

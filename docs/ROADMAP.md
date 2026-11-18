@@ -9,11 +9,12 @@
   save/open and PNG export. `render`: wgpu compositor and canvas view with zoom, pan and rotation.
   Painting with the mouse: brush engine, Pencil/Ink/Airbrush/Eraser. Procreate-like interface:
   top bar, sidebar sliders, brush/layers/color/actions panels, own icons, dark/light palette,
-  file dialogs, unsaved-changes prompt, all v0.1 Photoshop shortcuts.
+  file dialogs, unsaved-changes prompt, all v0.1 Photoshop shortcuts. Pen input through
+  Windows Ink (pressure, eraser end, barrel button).
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** pen input through Windows Ink (pressure and tilt), then Settings (language, theme,
-  update checks) and the "New canvas" dialog.
+- **Next:** Settings (language, theme, update checks, remembered) and the "New canvas" dialog,
+  then the clear "no GPU" error. That closes v0.1.
 
 ## Phase 0 — Foundation
 
@@ -50,7 +51,8 @@
 - [x] Own minimalist icon set (vector line icons painted in code, `ui/icons.rs`)
 - [x] Brush picker, layers panel (visibility, lock, rename, opacity, blend, duplicate, merge,
       delete), color picker (HSV square + history) and eyedropper
-- [ ] Pen input through Windows Ink (`WM_POINTER`), mouse fallback
+- [x] Pen input through Windows Ink (`WM_POINTER`): pressure per coalesced sample, eraser end,
+      barrel button = eyedropper, no press-and-hold ripples; mouse fallback (ADR 0004)
 - [x] Photoshop shortcuts marked ✅ in `SHORTCUTS.md`
 - [x] Fluent texts in English and Spanish (system language; test checks both files match)
 - [x] Updater: check at startup and every 5 h, banner, verified install (ADR 0002)
@@ -64,7 +66,7 @@
 
 - [ ] Full brush library by category (Sketching, Inking, Drawing, Painting, Artistic,
       Calligraphy, Airbrushing, Textures, Abstract, Charcoals, Elements, Spraypaints…)
-- [ ] Brush Studio: edit every parameter, grain and shape textures, live preview
+- [ ] Brush Studio: edit every parameter, grain and shape textures, live preview, pen tilt
 - [ ] Smudge tool and wet mixing
 - [ ] Stabilization modes (StreamLine, motion filtering)
 - [ ] QuickShape (hold to snap lines, ellipses, polygons)

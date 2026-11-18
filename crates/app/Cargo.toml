@@ -10,6 +10,7 @@ rustcreate-core.workspace = true
 rustcreate-render.workspace = true
 eframe.workspace = true
 fluent-bundle.workspace = true
+raw-window-handle.workspace = true
 reqwest.workspace = true
 rfd.workspace = true
 serde.workspace = true
@@ -19,6 +20,9 @@ sys-locale.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 unic-langid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
 
 [target.'cfg(windows)'.build-dependencies]
 resvg.workspace = true

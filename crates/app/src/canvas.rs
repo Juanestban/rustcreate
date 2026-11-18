@@ -78,6 +78,8 @@ pub struct Canvas {
   stroke: Option<Stroke>,
   /// Where the last stroke ended, in canvas pixels, for Shift+click lines.
   last_point: Option<(f32, f32)>,
+  /// The pen's pressure while it touches (Windows Ink); `None` means mouse.
+  pen: Option<f32>,
 }
 
 impl Canvas {
@@ -85,7 +87,7 @@ impl Canvas {
   pub fn new(render_state: &egui_wgpu::RenderState, doc: &Document) -> Self {
     let renderer = CanvasRenderer::new(&render_state.device, render_state.target_format, (doc.width, doc.height));
     render_state.renderer.write().callback_resources.insert(renderer);
-    Self { view: None, tools: Tools::default(), stroke: None, last_point: None }
+    Self { view: None, tools: Tools::default(), stroke: None, last_point: None, pen: None }
   }
 
   /// A new or opened document: a renderer of its size, the view fitted again. Tools stay.
@@ -117,8 +119,9 @@ impl Canvas {
 
   /// Turns primary-button presses and drags into strokes. Space and R drags belong to the view.
   fn paint(&mut self, ui: &egui::Ui, response: &egui::Response, to_canvas: impl Fn(Pos2) -> Pos2, doc: &mut Document) {
+    let pen = crate::pen::buttons();
     let (pressed, released, shift, alt, view_drag, origin, moves) = ui.input(|i| {
-      let moves: Vec<Pos2> = i.events.iter().filter_map(|e| if let Event::PointerMoved(p) = e { Some(*p) } else { None }).collect();
+      let moves = samples(&i.events, &mut self.pen);
       (
         i.pointer.primary_pressed(),
         i.pointer.primary_released(),
@@ -129,8 +132,8 @@ impl Canvas {
         moves,
       )
     });
-    // Eyedropper: I, or Alt held. Drag to scrub; it samples what is visible.
-    if (self.tools.picking || alt) && self.stroke.is_none() && !view_drag {
+    // Eyedropper: I, Alt held or the pen's barrel button.
+    if (self.tools.picking || alt || pen.barrel) && self.stroke.is_none() && !view_drag {
       if response.is_pointer_button_down_on()
         && let Some(p) = response.interact_pointer_pos()
         && let p = to_canvas(p)
@@ -147,8 +150,6 @@ impl Canvas {
       }
       return;
     }
-    // shortcut: mouse and trackpad paint at full pressure; pen pressure comes with Windows Ink (ADR 0004).
-    const PRESSURE: f32 = 1.0;
     if pressed
       && self.stroke.is_none()
       && !view_drag
@@ -156,6 +157,9 @@ impl Canvas {
       && let Some(origin) = origin
     {
       let (brush, color, erase) = self.tools.current();
+      // Flipping the pen to its eraser end erases with the same brush.
+      let erase = erase || pen.eraser;
+      let pressure = moves.first().map_or(self.pen.unwrap_or(1.0), |&(_, pressure)| pressure);
       // A locked layer refuses the stroke.
       if let Some(mut stroke) = doc.begin_stroke(brush, color, erase) {
         if !erase {
@@ -163,16 +167,16 @@ impl Canvas {
         }
         let p = to_canvas(origin);
         match self.last_point {
-          Some(from) if shift => stroke.line(doc, from, (p.x, p.y), PRESSURE),
-          _ => stroke.add(doc, p.x, p.y, PRESSURE),
+          Some(from) if shift => stroke.line(doc, from, (p.x, p.y), pressure),
+          _ => stroke.add(doc, p.x, p.y, pressure),
         }
         self.stroke = Some(stroke);
       }
     }
     if let Some(stroke) = &mut self.stroke {
-      for p in moves {
+      for (p, pressure) in moves {
         let p = to_canvas(p);
-        stroke.add(doc, p.x, p.y, PRESSURE);
+        stroke.add(doc, p.x, p.y, pressure);
       }
       if released {
         self.last_point = stroke.position();
@@ -180,6 +184,24 @@ impl Canvas {
       }
     }
   }
+}
+
+/// This frame's pointer positions with the pressure each was drawn at. A pen sends a touch event
+/// with its force just before the pointer move it causes; the mouse has none and paints at full
+/// pressure.
+fn samples(events: &[Event], pen: &mut Option<f32>) -> Vec<(Pos2, f32)> {
+  let mut out = Vec::new();
+  for event in events {
+    match event {
+      Event::Touch { phase, force, .. } => {
+        let lifted = matches!(phase, egui::TouchPhase::End | egui::TouchPhase::Cancel);
+        *pen = if lifted { None } else { force.filter(|f| *f > 0.0) };
+      }
+      Event::PointerMoved(p) => out.push((*p, pen.unwrap_or(1.0))),
+      _ => {}
+    }
+  }
+  out
 }
 
 fn handle_input(ui: &egui::Ui, response: &egui::Response, rect: Rect, canvas: Vec2, view: &mut View, hand: bool) {
@@ -266,6 +288,24 @@ mod tests {
 
   fn close(a: Pos2, b: Pos2) -> bool {
     (a - b).length() < 1e-3
+  }
+
+  #[test]
+  fn pen_pressure_follows_touch_force() {
+    let touch = |phase, force| Event::Touch { device_id: egui::TouchDeviceId(0), id: egui::TouchId(1), phase, pos: Pos2::ZERO, force };
+    let mut pen = None;
+    let events = [
+      Event::PointerMoved(Pos2::new(1.0, 0.0)),
+      touch(egui::TouchPhase::Start, Some(0.25)),
+      Event::PointerMoved(Pos2::new(2.0, 0.0)),
+      touch(egui::TouchPhase::Move, Some(0.75)),
+      Event::PointerMoved(Pos2::new(3.0, 0.0)),
+    ];
+    let pressures: Vec<f32> = samples(&events, &mut pen).into_iter().map(|(_, p)| p).collect();
+    assert_eq!(pressures, [1.0, 0.25, 0.75], "mouse first, then the pen's force");
+    assert_eq!(pen, Some(0.75), "kept for the next frame");
+    samples(&[touch(egui::TouchPhase::End, Some(0.1))], &mut pen);
+    assert_eq!(pen, None, "lifting the pen goes back to the mouse");
   }
 
   #[test]
