@@ -94,6 +94,8 @@ pub(crate) struct App {
   error: Option<String>,
   closing: bool,
   title: String,
+  /// An adjustment dialog, previewing on the canvas.
+  adjusting: Option<ui::adjust::Adjusting>,
 }
 
 /// Common canvas sizes for the "New canvas" dialog, with their name tokens.
@@ -143,6 +145,7 @@ impl App {
       preview: None,
       settings,
       new_canvas: None,
+      adjusting: None,
       error: None,
       closing: false,
       title: String::new(),
@@ -159,6 +162,8 @@ impl App {
 
   /// Runs `action` now, or first asks to save unsaved changes.
   pub(crate) fn request(&mut self, action: Pending) {
+    // An open adjustment keeps what it shows.
+    self.adjusting = None;
     // A transform in progress is applied first, so it is saved or asked about like any edit.
     self.canvas.end_transform(&mut self.doc, true);
     if self.dirty() { self.confirm = Some(action) } else { self.perform(action) }
@@ -220,6 +225,7 @@ impl App {
 
   /// Saves to the current file, or asks where. Returns whether it saved.
   pub(crate) fn save(&mut self, choose: bool) -> bool {
+    self.adjusting = None;
     self.canvas.end_transform(&mut self.doc, true);
     let path = match &self.path {
       Some(path) if !choose => path.clone(),
@@ -255,13 +261,25 @@ impl App {
 
   /// File and interface shortcuts (docs/SHORTCUTS.md). The longer combinations go first.
   fn shortcuts(&mut self, ctx: &egui::Context) {
-    if ctx.egui_wants_keyboard_input() || self.confirm.is_some() || self.new_canvas.is_some() {
+    if ctx.egui_wants_keyboard_input() || self.confirm.is_some() || self.new_canvas.is_some() || self.adjusting.is_some() {
       return;
     }
     let (m, shift, alt) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT, egui::Modifiers::ALT);
     let key = |modifiers, key| ctx.input_mut(|i| i.consume_key(modifiers, key));
     if key(m | alt | shift, egui::Key::W) {
       self.export_png();
+    }
+    // Adjustments. Ctrl+Shift+I (invert selection) is the canvas's: Ctrl+I must not take it.
+    if key(m | shift, egui::Key::U) {
+      self.start_adjust(rustcreate_core::Adjustment::Desaturate);
+    }
+    if !ctx.input(|i| i.modifiers.shift) && key(m, egui::Key::I) {
+      self.start_adjust(rustcreate_core::Adjustment::Invert);
+    }
+    for (k, index) in [(egui::Key::U, 0), (egui::Key::L, 2), (egui::Key::M, 3)] {
+      if key(m, k) {
+        self.start_adjust(ui::adjust::menu()[index].1.clone());
+      }
     }
     if key(m | shift, egui::Key::S) {
       self.save(true);
@@ -393,7 +411,7 @@ impl eframe::App for App {
       self.top_bar(ui);
       self.sidebar(ui);
     }
-    let keys = !ctx.egui_wants_keyboard_input() && self.confirm.is_none();
+    let keys = !ctx.egui_wants_keyboard_input() && self.confirm.is_none() && self.adjusting.is_none();
     let render_state = self.render_state.clone();
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(ui.visuals().extreme_bg_color)).show(ui, |ui| {
       self.canvas.show(ui, &render_state, &mut self.doc, keys, &self.i18n);
@@ -402,6 +420,7 @@ impl eframe::App for App {
       self.popovers(&ctx);
       self.brush_studio(&ctx);
     }
+    self.adjust_dialog(&ctx);
     self.dialogs(&ctx);
     // Not mid-drag, so a size slider being dragged saves once at the end.
     if !ctx.input(|i| i.pointer.any_down()) {

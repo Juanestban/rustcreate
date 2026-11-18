@@ -26,6 +26,7 @@ pub enum Popover {
   Layers,
   Color,
   Select,
+  Adjust,
 }
 
 const BLEND_MODES: [(BlendMode, &str); 9] = [
@@ -52,7 +53,7 @@ impl App {
           icons::button(ui, Icon::Gallery, false, false, &format!("{} · {soon}", self.i18n.tr("ui-gallery")));
           self.popover_button(ui, Icon::Actions, Popover::Actions, "ui-actions");
           ui.add_space(8.0);
-          icons::button(ui, Icon::Adjustments, false, false, &format!("{} · {soon}", self.i18n.tr("ui-adjustments")));
+          self.popover_button(ui, Icon::Adjustments, Popover::Adjust, "ui-adjustments");
           // Selection: picks the tool; clicking it again opens its options.
           let selecting = self.canvas.tools.tool == Tool::Select;
           if icons::button(ui, Icon::Selection, selecting, true, &self.i18n.tr("ui-selection")).clicked() {
@@ -195,6 +196,7 @@ impl App {
           Popover::Brushes => self.brushes_panel(ui),
           Popover::Fill => self.fill_panel(ui),
           Popover::Select => self.select_panel(ui),
+          Popover::Adjust => self.adjust_menu(ui),
           Popover::Layers => self.layers_panel(ui),
           Popover::Color => self.color_panel(ui),
         }

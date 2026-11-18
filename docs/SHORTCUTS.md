@@ -49,6 +49,17 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Backspace` / `Delete` | Clear layer (or selection) | ✅ |
 | `Alt+Backspace` | Fill with primary color | ✅ |
 
+## Adjustments
+
+| Shortcut | Action | Status |
+|---|---|---|
+| `Ctrl+U` | Hue/Saturation | ✅ |
+| `Ctrl+L` | Levels | ✅ |
+| `Ctrl+M` | Curves | ✅ |
+| `Ctrl+I` | Invert | ✅ |
+| `Ctrl+Shift+U` | Desaturate | ✅ |
+| `Enter` / `Esc` | Apply / cancel the open adjustment | ✅ |
+
 ## Layers
 
 | Shortcut | Action | Status |

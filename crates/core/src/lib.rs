@@ -1,5 +1,6 @@
 //! The document model: a canvas of tiled RGBA8 raster layers with undo (ADR 0005). No GPU here.
 
+mod adjust;
 pub mod blend;
 mod brush;
 mod file;
@@ -16,6 +17,7 @@ mod transform;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+pub use adjust::{Adjust, Adjustment, curve};
 pub use brush::{Brush, Stroke};
 pub use file::{FORMAT, FileError};
 pub use fill::{Gradient, GradientKind};
