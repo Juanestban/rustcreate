@@ -15,10 +15,11 @@
   v0.1 features are in.** Phase 2 started: Smudge tool, end taper, pulled-string stabilizer, brush tips and grains,
   Brush Studio, the brush library with saved brushes and a brush per tool, the paint bucket and the
   gradient, QuickShape, the color disc with harmonies and palettes, drawing guides with symmetry,
-  brush import from `.brushset` and `.abr`, ColorDrop and the eyedropper loupe.
+  brush import from `.brushset` and `.abr`, ColorDrop and the eyedropper loupe,
+  motion filtering.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: motion filtering; perspective guides; QuickShape editing; wet mixing; pen
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: perspective guides; QuickShape editing; wet mixing; pen
   tilt.
 
 ## Phase 0 — Foundation
@@ -84,7 +85,8 @@
 - [ ] Wet mixing (paint brushes that pick up and blend canvas color)
 - [x] Stabilization: StreamLine plus a pulled-string stabilizer; strokes catch up with the
       pointer when they end; per-brush settings in the brushes panel
-- [ ] Motion filtering (remove jitter from shaky hands or noisy tablets)
+- [x] Motion filtering per brush: adaptive smoothing (after the 1€ filter) that removes slow
+      jitter from shaky hands or noisy tablets without making fast strokes lag
 - [x] QuickShape: holding still at the end of a stroke snaps it to a line, polyline, ellipse
       or polygon drawn with the same brush (setting to turn it off)
 - [ ] QuickShape editing: drag the shape's handles after snapping; arcs; perfect circles and

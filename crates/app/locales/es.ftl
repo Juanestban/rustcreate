@@ -187,3 +187,4 @@ ui-brush-import-failed = No se pudieron importar estos pinceles: { $error }
 ui-tip-imported = Importada
 ui-grain-imported = Importado
 ui-color-tooltip = Color · arrástralo al lienzo para rellenar una zona
+ui-brush-motion-filter = Filtrado de movimiento

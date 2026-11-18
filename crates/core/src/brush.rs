@@ -43,6 +43,9 @@ pub struct Brush {
   /// Pulled-string stabilizer (Photoshop): the brush only moves once the pointer is this many
   /// pixels away, so small wobbles never reach the canvas. 0 = off.
   pub string: f32,
+  /// Motion filtering 0..=1: removes jitter from slow, shaky movement without slowing fast
+  /// strokes down (adaptive smoothing, after the 1€ filter).
+  pub motion_filter: f32,
   /// The dab's shape.
   pub tip: Tip,
   /// Tip rotation in degrees.
@@ -83,6 +86,7 @@ impl Brush {
       taper_start: 0.0,
       taper_end: 0.0,
       streamline: 0.1,
+      motion_filter: 0.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -109,6 +113,7 @@ impl Brush {
       taper_start: 40.0,
       taper_end: 40.0,
       streamline: 0.4,
+      motion_filter: 0.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -135,6 +140,7 @@ impl Brush {
       taper_start: 0.0,
       taper_end: 0.0,
       streamline: 0.0,
+      motion_filter: 0.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -165,6 +171,33 @@ struct Dab {
 
 type Textures = (Option<&'static [f32]>, Option<&'static [f32]>);
 
+/// Adaptive smoothing (the 1€ filter, per sample instead of per second): the cutoff rises with
+/// speed, so slow jitter is smoothed hard and fast movement passes almost untouched.
+#[derive(Debug, Default, Clone, Copy)]
+struct MotionFilter {
+  /// Filtered position and filtered velocity (pixels per sample).
+  state: Option<((f32, f32), (f32, f32))>,
+}
+
+impl MotionFilter {
+  fn apply(&mut self, p: (f32, f32), amount: f32) -> (f32, f32) {
+    let amount = amount.clamp(0.0, 1.0);
+    let Some((last, velocity)) = self.state.filter(|_| amount > 0.0) else {
+      self.state = Some((p, (0.0, 0.0)));
+      return p;
+    };
+    // Smoothing factor for a cutoff in cycles per sample.
+    let alpha = |cutoff: f32| 1.0 / (1.0 + 1.0 / (std::f32::consts::TAU * cutoff));
+    let a = alpha(1.0);
+    let velocity = (velocity.0 + a * (p.0 - last.0 - velocity.0), velocity.1 + a * (p.1 - last.1 - velocity.1));
+    let cutoff = 1.0 + (0.03 - 1.0) * amount + 0.06 * velocity.0.hypot(velocity.1);
+    let a = alpha(cutoff);
+    let out = (last.0 + a * (p.0 - last.0), last.1 + a * (p.1 - last.1));
+    self.state = Some((out, velocity));
+    out
+  }
+}
+
 /// A tile touched by the stroke: its pixels before the stroke and the stroke's coverage.
 struct StrokeTile {
   before: Vec<u8>,
@@ -192,6 +225,7 @@ pub struct Stroke {
   pointer: Option<(f32, f32, f32)>,
   /// Pulled string: the end of the string the pointer drags.
   pulled: Option<(f32, f32)>,
+  motion: MotionFilter,
   /// The stroke's direction in radians, for tips that follow it.
   direction: f32,
   /// Dabs placed so far, the seed of each dab's jitter.
@@ -230,6 +264,7 @@ impl Document {
       placed: 0,
       points: Vec::new(),
       mirrors: Vec::new(),
+      motion: MotionFilter::default(),
     })
   }
 
@@ -247,6 +282,7 @@ impl Stroke {
     let pressure = pressure.clamp(0.0, 1.0);
     self.pointer = Some((x, y, pressure));
     self.points.push((x, y));
+    let (x, y) = self.motion.apply((x, y), self.brush.motion_filter);
     // Pulled string: drag the string's end only as far as the pointer pulls it.
     let (x, y) = match self.pulled {
       Some((sx, sy)) if self.brush.string > 0.0 => {
@@ -563,6 +599,7 @@ mod tests {
       taper_start: 0.0,
       taper_end: 0.0,
       streamline: 0.0,
+      motion_filter: 0.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -757,6 +794,28 @@ mod tests {
     assert!(alpha(&doc, 0, 160, 64) < 255 && alpha(&doc, 0, 240, 336) < 255);
     assert!(doc.undo());
     assert_eq!(alpha(&doc, 0, 320, 340), 0);
+  }
+
+  #[test]
+  fn motion_filter_removes_slow_jitter_but_keeps_fast_moves() {
+    let jitter = |i: usize| if i.is_multiple_of(2) { 1.5 } else { -1.5 };
+    let (mut filter, mut worst) = (MotionFilter::default(), 0.0f32);
+    for i in 0..60 {
+      let (_, y) = filter.apply((i as f32 * 1.0, 100.0 + jitter(i)), 1.0);
+      if i > 10 {
+        worst = worst.max((y - 100.0).abs());
+      }
+    }
+    assert!(worst < 0.6, "slow shaky line smoothed: {worst}");
+    let mut filter = MotionFilter::default();
+    let mut last = (0.0, 0.0);
+    for i in 0..20 {
+      last = filter.apply((i as f32 * 40.0, 0.0), 1.0);
+    }
+    assert!(760.0 - last.0 < 40.0, "a fast stroke barely lags: {}", last.0);
+    let mut off = MotionFilter::default();
+    off.apply((0.0, 0.0), 0.0);
+    assert_eq!(off.apply((5.0, 3.0), 0.0), (5.0, 3.0), "0 = off");
   }
 
   #[test]

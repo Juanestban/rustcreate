@@ -158,6 +158,9 @@ impl App {
           }
           Section::Stroke => {
             row(ui, "ui-brush-streamline", &mut |ui| percent(ui, &mut brush.streamline, 0.95));
+            row(ui, "ui-brush-motion-filter", &mut |ui| {
+              percent(ui, &mut brush.motion_filter, 1.0);
+            });
             row(ui, "ui-brush-string", &mut |ui| {
               ui.add(egui::Slider::new(&mut brush.string, 0.0..=200.0).suffix(" px").fixed_decimals(0))
                 .on_hover_text(i18n.tr("ui-brush-string-help"));

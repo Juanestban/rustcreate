@@ -187,3 +187,4 @@ ui-brush-import-failed = Could not import these brushes: { $error }
 ui-tip-imported = Imported
 ui-grain-imported = Imported
 ui-color-tooltip = Color · drag onto the canvas to fill an area
+ui-brush-motion-filter = Motion filtering
