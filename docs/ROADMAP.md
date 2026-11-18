@@ -5,10 +5,10 @@
 - **Done:** project foundation (licenses, docs, ADRs 0001–0006, graphify setup), app icon,
   CI and release packaging copied from archi-games. App skeleton: eframe window with the icon,
   system dark/light theme, Fluent `en`/`es`, updater (startup + every 5 h, banner, verified
-  install). `core` has tiled layers and the document type.
+  install). `core`: tiled layers, layer stack operations, blend modes and undo/redo history.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** layer stack operations and history in `crates/core`, then create `crates/render`
+- **Next:** `.rcreate` save/open and PNG export in `crates/core`, then create `crates/render`
   (wgpu canvas) — the crate is added with its first real code.
 
 ## Phase 0 — Foundation
@@ -23,10 +23,11 @@
 
 ### Core (`crates/core`)
 - [x] Tiled RGBA8 layers (256×256, lazy allocation)
-- [ ] Layer stack: add, delete, duplicate, reorder, merge down, rename
-- [ ] Layer properties: opacity, hidden, locked, blend mode (Normal, Multiply, Screen, Overlay,
-      Darken, Lighten, Add, Color Dodge, Color Burn)
-- [ ] History: tile snapshots, 250 steps, memory cap
+- [x] Layer stack: add, delete, duplicate, reorder, merge down, rename
+- [x] Layer properties: opacity, hidden, locked, blend mode (Normal, Multiply, Screen, Overlay,
+      Darken, Lighten, Add, Color Dodge, Color Burn), with a CPU reference compositor
+      (`core::blend`) that merge down uses and the GPU shaders must match
+- [x] History: copy-on-write tile snapshots, 250 steps, 2 GB memory cap
 - [ ] `.rcreate` save/open (atomic save), PNG export
 
 ### Render (`crates/render`)
