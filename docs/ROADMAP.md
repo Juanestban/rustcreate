@@ -16,10 +16,10 @@
   Brush Studio, the brush library with saved brushes and a brush per tool, the paint bucket and the
   gradient, QuickShape, the color disc with harmonies and palettes, drawing guides with symmetry,
   brush import from `.brushset` and `.abr`, ColorDrop and the eyedropper loupe,
-  motion filtering, perspective guides.
+  motion filtering, perspective guides, QuickShape editing and arcs.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: QuickShape editing; wet mixing; pen
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: wet mixing; pen
   tilt.
 
 ## Phase 0 — Foundation
@@ -89,8 +89,8 @@
       jitter from shaky hands or noisy tablets without making fast strokes lag
 - [x] QuickShape: holding still at the end of a stroke snaps it to a line, polyline, ellipse
       or polygon drawn with the same brush (setting to turn it off)
-- [ ] QuickShape editing: drag the shape's handles after snapping; arcs; perfect circles and
-      squares with a second key
+- [x] QuickShape editing: after lifting, drag the shape's handles (ends, corners, ellipse center
+      and axes); arcs; Shift makes it perfect (circle, regular polygon, 15° lines)
 - [x] Paint bucket with threshold, sampling the active layer or all visible layers, growing
       under antialiased edges; gradient tool (linear/radial, to the secondary color or to clear,
       dithered, live while dragging); Alt+Backspace fills the layer

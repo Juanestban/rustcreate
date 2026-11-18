@@ -1,5 +1,5 @@
-//! QuickShape: recognizes a hand-drawn line, polyline, ellipse or polygon so a held stroke can
-//! snap to a clean one.
+//! QuickShape: recognizes a hand-drawn line, arc, polyline, ellipse or polygon so a held stroke
+//! can snap to a clean one, which can then be edited by its handles or made perfect.
 
 use std::f32::consts::TAU;
 
@@ -8,6 +8,8 @@ type P = (f32, f32);
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
   Line(P, P),
+  /// A circular arc from the first point, through the second, to the third.
+  Arc(P, P, P),
   /// Open corners, start to end.
   Polyline(Vec<P>),
   Ellipse {
@@ -38,7 +40,16 @@ impl Shape {
       if error(&path, &[first, last], false) / size < 0.025 {
         return Some(Shape::Line(first, last));
       }
-      return polygon_error.map(|_| Shape::Polyline(corners));
+      let mid = path[path.len() / 2];
+      let arc_error = circle(first, mid, last)
+        .map(|(c, r)| path.iter().map(|&p| (dist(p, c) - r).abs()).sum::<f32>() / path.len() as f32 / size)
+        .filter(|&e| e < 0.012);
+      return match (polygon_error, arc_error) {
+        (Some(p), Some(a)) if p <= a => Some(Shape::Polyline(corners)),
+        (_, Some(_)) => Some(Shape::Arc(first, mid, last)),
+        (Some(_), None) => Some(Shape::Polyline(corners)),
+        (None, None) => None,
+      };
     }
     let ellipse = fit_ellipse(&path).filter(|e| e.1 / size < 0.03);
     match (polygon_error, ellipse) {
@@ -53,6 +64,21 @@ impl Shape {
   pub fn outline(&self) -> Vec<P> {
     match self {
       Shape::Line(a, b) => vec![*a, *b],
+      Shape::Arc(a, m, b) => {
+        let Some((c, r)) = circle(*a, *m, *b) else { return vec![*a, *b] };
+        let angle = |p: P| (p.1 - c.1).atan2(p.0 - c.0);
+        let (start, through, end) = (angle(*a), angle(*m), angle(*b));
+        // The way round from start to end that passes the middle point.
+        let ccw = (end - start).rem_euclid(TAU);
+        let sweep = if (through - start).rem_euclid(TAU) <= ccw { ccw } else { ccw - TAU };
+        let steps = (r * sweep.abs() / 4.0).clamp(8.0, 720.0) as usize;
+        (0..=steps)
+          .map(|i| {
+            let t = start + sweep * i as f32 / steps as f32;
+            (c.0 + r * t.cos(), c.1 + r * t.sin())
+          })
+          .collect()
+      }
       Shape::Polyline(points) => points.clone(),
       Shape::Polygon(points) => points.iter().chain(points.first()).copied().collect(),
       Shape::Ellipse { center, radii, angle } => {
@@ -69,6 +95,95 @@ impl Shape {
       }
     }
   }
+}
+
+impl Shape {
+  /// The points that can be dragged to edit the shape. An ellipse has its center, then the end
+  /// of each axis.
+  pub fn handles(&self) -> Vec<P> {
+    match self {
+      Shape::Line(a, b) => vec![*a, *b],
+      Shape::Arc(a, m, b) => vec![*a, *m, *b],
+      Shape::Polyline(points) | Shape::Polygon(points) => points.clone(),
+      Shape::Ellipse { center, radii, angle } => {
+        let (sin, cos) = angle.sin_cos();
+        vec![*center, (center.0 + radii.0 * cos, center.1 + radii.0 * sin), (center.0 - radii.1 * sin, center.1 + radii.1 * cos)]
+      }
+    }
+  }
+
+  /// Moves handle `index` (from `handles`) to `p`. Dragging an ellipse's first axis turns it too.
+  pub fn move_handle(&mut self, index: usize, p: P) {
+    match self {
+      Shape::Line(a, b) => *[a, b][index.min(1)] = p,
+      Shape::Arc(a, m, b) => *[a, m, b][index.min(2)] = p,
+      Shape::Polyline(points) | Shape::Polygon(points) => {
+        if let Some(point) = points.get_mut(index) {
+          *point = p;
+        }
+      }
+      Shape::Ellipse { center, radii, angle } => {
+        let (dx, dy) = (p.0 - center.0, p.1 - center.1);
+        match index {
+          0 => *center = p,
+          1 => (radii.0, *angle) = (dx.hypot(dy).max(1.0), dy.atan2(dx)),
+          _ => radii.1 = (-dx * angle.sin() + dy * angle.cos()).abs().max(1.0),
+        }
+      }
+    }
+  }
+
+  /// The perfect version: a circle, a regular polygon (square, equilateral triangle…), lines at
+  /// multiples of 15°, an arc symmetric about its middle.
+  pub fn perfect(&self) -> Shape {
+    let snap = |from: P, to: P| {
+      let step = 15f32.to_radians();
+      let (length, a) = (dist(from, to), ((to.1 - from.1).atan2(to.0 - from.0) / step).round() * step);
+      (from.0 + length * a.cos(), from.1 + length * a.sin())
+    };
+    match self {
+      Shape::Line(a, b) => Shape::Line(*a, snap(*a, *b)),
+      Shape::Polyline(points) => {
+        let mut out = vec![points[0]];
+        for pair in points.windows(2) {
+          let from = *out.last().expect("one point");
+          out.push(snap(from, (from.0 + pair[1].0 - pair[0].0, from.1 + pair[1].1 - pair[0].1)));
+        }
+        Shape::Polyline(out)
+      }
+      Shape::Polygon(points) => {
+        let n = points.len() as f32;
+        let c = points.iter().fold((0.0, 0.0), |c, p| (c.0 + p.0 / n, c.1 + p.1 / n));
+        let r = points.iter().map(|&p| dist(p, c)).sum::<f32>() / n;
+        let start = (points[0].1 - c.1).atan2(points[0].0 - c.0);
+        Shape::Polygon((0..points.len()).map(|k| (start + k as f32 / n * TAU).sin_cos()).map(|(s, co)| (c.0 + r * co, c.1 + r * s)).collect())
+      }
+      Shape::Ellipse { center, radii, angle } => {
+        let r = (radii.0 + radii.1) / 2.0;
+        Shape::Ellipse { center: *center, radii: (r, r), angle: *angle }
+      }
+      Shape::Arc(a, _, b) => {
+        let outline = self.outline();
+        let Some((c, r)) = circle(outline[0], outline[outline.len() / 2], outline[outline.len() - 1]) else { return self.clone() };
+        // The middle point halfway round, so both halves match.
+        let m = outline[outline.len() / 2];
+        let t = (m.1 - c.1).atan2(m.0 - c.0);
+        Shape::Arc(*a, (c.0 + r * t.cos(), c.1 + r * t.sin()), *b)
+      }
+    }
+  }
+}
+
+/// The circle through three points, or `None` when they are in a line.
+fn circle(a: P, b: P, c: P) -> Option<(P, f32)> {
+  let d = 2.0 * (a.0 * (b.1 - c.1) + b.0 * (c.1 - a.1) + c.0 * (a.1 - b.1));
+  let scale = dist(a, b).max(dist(b, c)).max(dist(a, c));
+  if d.abs() < 1e-3 * scale * scale {
+    return None;
+  }
+  let (a2, b2, c2) = (a.0 * a.0 + a.1 * a.1, b.0 * b.0 + b.1 * b.1, c.0 * c.0 + c.1 * c.1);
+  let center = ((a2 * (b.1 - c.1) + b2 * (c.1 - a.1) + c2 * (a.1 - b.1)) / d, (a2 * (c.0 - b.0) + b2 * (a.0 - c.0) + c2 * (b.0 - a.0)) / d);
+  Some((center, dist(center, a)))
 }
 
 fn dist(a: P, b: P) -> f32 {
@@ -211,6 +326,36 @@ mod tests {
     }
     out.push(corners[corners.len() - 1]);
     out
+  }
+
+  #[test]
+  fn recognizes_arcs_and_draws_them_through_the_middle() {
+    let arc: Vec<P> = (0..=60).map(|i| (i as f32 / 60.0 * 2.0).sin_cos()).map(|(s, c)| (200.0 + 100.0 * c, 200.0 + 100.0 * s)).collect();
+    let Some(shape @ Shape::Arc(..)) = Shape::recognize(&arc) else { panic!("an arc: {:?}", Shape::recognize(&arc)) };
+    let outline = shape.outline();
+    assert!(outline.iter().all(|&p| (dist(p, (200.0, 200.0)) - 100.0).abs() < 2.0), "on the circle");
+    // Through the middle, not the long way round.
+    assert!(outline.iter().all(|&p| p.1 >= 195.0));
+  }
+
+  #[test]
+  fn handles_edit_and_perfect_shapes() {
+    let mut line = Shape::Line((0.0, 0.0), (100.0, 3.0));
+    line.move_handle(1, (100.0, 8.0));
+    let Shape::Line(_, end) = line.perfect() else { unreachable!() };
+    assert!(end.1.abs() < 1e-3 && (end.0 - 100.3).abs() < 0.1, "snapped flat: {end:?}");
+
+    let wobbly = Shape::Polygon(vec![(0.0, 0.0), (110.0, 5.0), (104.0, 96.0), (-3.0, 101.0)]);
+    let Shape::Polygon(square) = wobbly.perfect() else { unreachable!() };
+    let sides: Vec<f32> = (0..4).map(|i| dist(square[i], square[(i + 1) % 4])).collect();
+    assert!(sides.iter().all(|s| (s - sides[0]).abs() < 1e-2), "{sides:?}");
+
+    let mut ellipse = Shape::Ellipse { center: (50.0, 50.0), radii: (40.0, 20.0), angle: 0.0 };
+    assert_eq!(ellipse.handles()[1], (90.0, 50.0));
+    ellipse.move_handle(2, (50.0, 80.0));
+    ellipse.move_handle(0, (60.0, 60.0));
+    assert_eq!(ellipse, Shape::Ellipse { center: (60.0, 60.0), radii: (40.0, 30.0), angle: 0.0 });
+    assert!(matches!(ellipse.perfect(), Shape::Ellipse { radii: (35.0, 35.0), .. }));
   }
 
   #[test]

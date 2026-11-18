@@ -95,6 +95,13 @@ pub struct Canvas {
   loupe: Option<(Pos2, [u8; 3])>,
   /// The guide point being dragged while editing the guide.
   handle: Option<usize>,
+  /// QuickShape: the shape the stroke snapped to and its pressure. After release the stroke
+  /// stays open while the shape is edited by its handles (`shape_edit`).
+  shape: Option<(Shape, f32)>,
+  shape_edit: bool,
+  shape_handle: Option<usize>,
+  /// Shift on the previous frame, to make the shape perfect once per press.
+  shift: bool,
 }
 
 /// A ring by the pointer: the color under it on top, the one before picking below.
@@ -131,6 +138,10 @@ impl Canvas {
       assist: (Pos2::ZERO, None),
       loupe: None,
       handle: None,
+      shape: None,
+      shape_edit: false,
+      shape_handle: None,
+      shift: false,
     }
   }
 
@@ -148,6 +159,15 @@ impl Canvas {
     let view = self.view.get_or_insert_with(|| View::fit(rect.size(), canvas));
     handle_input(ui, &response, rect, canvas, view, self.tools.hand);
     let view = *view;
+    // Editing a QuickShape ends with any key or a press outside the canvas, before shortcuts
+    // (undo, layer changes) touch the document under the open stroke.
+    if self.shape_edit
+      && ui.input(|i| {
+        i.events.iter().any(|e| matches!(e, Event::Key { pressed: true, .. })) || (i.pointer.any_pressed() && !response.contains_pointer())
+      })
+    {
+      self.end_shape(doc);
+    }
     let painting = self.stroke.is_some() || self.gradient.is_some();
     if keys {
       ui.input_mut(|input| self.tools.shortcuts(input, doc, painting));
@@ -163,6 +183,14 @@ impl Canvas {
     self.tools.guides.draw(&ui.painter_at(rect), canvas, crate::ui::theme::ACCENT.gamma_multiply(0.75), to_screen);
     if let Some((at, before)) = self.loupe {
       loupe(ui.painter(), at, self.tools.primary, before);
+    }
+    if self.shape_edit
+      && let Some((shape, _)) = &self.shape
+    {
+      let (fill, line) = (crate::ui::theme::ACCENT, egui::Stroke::new(2.0, egui::Color32::WHITE));
+      for (x, y) in shape.handles() {
+        ui.painter().circle(to_screen(Pos2::new(x, y)), 7.0, fill, line);
+      }
     }
     // The gradient's guide line while dragging.
     if let Some((_, start, _, end)) = &self.gradient {
@@ -238,6 +266,12 @@ impl Canvas {
         moves,
       )
     });
+    let shift_down = shift && !self.shift;
+    self.shift = shift;
+    if self.shape_edit {
+      self.edit_shape(ui, &to_canvas, doc, pressed, released, shift_down, origin);
+      return;
+    }
     // Editing the guide: drags move its points; nothing paints.
     if self.tools.guides.editing && self.tools.guides.kind != crate::guides::Kind::Off {
       let size = vec2(doc.width as f32, doc.height as f32);
@@ -329,6 +363,7 @@ impl Canvas {
         }
         self.stroke = Some(stroke);
         self.hold = (ui.input(|i| i.time), origin);
+        self.shape = None;
         self.assist = (p, None);
         self.snapped = false;
       }
@@ -350,7 +385,10 @@ impl Canvas {
       // QuickShape: holding still at the end snaps the stroke to the shape it looks like.
       if self.tools.quickshape && self.tools.tool != Tool::Smudge && now - self.hold.0 >= HOLD_SECONDS {
         if let Some(shape) = Shape::recognize(stroke.points()) {
+          // Shift held: the perfect version (circle, square, 15° lines).
+          let shape = if shift { shape.perfect() } else { shape };
           stroke.redraw(doc, &shape.outline(), pressure);
+          self.shape = Some((shape, pressure));
           self.snapped = true;
         }
         // Not a shape: try again after the next hold.
@@ -359,8 +397,69 @@ impl Canvas {
       ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
     if released && let Some(stroke) = self.stroke.take() {
+      if self.shape.is_some() {
+        // A snapped shape stays editable until a tap elsewhere or a key.
+        self.stroke = Some(stroke);
+        self.shape_edit = true;
+      } else {
+        self.last_point = stroke.finish(doc);
+      }
+    }
+  }
+
+  /// QuickShape editing: drag a handle to reshape, Shift for the perfect shape, a press away
+  /// from the handles ends it.
+  #[allow(clippy::too_many_arguments)]
+  fn edit_shape(
+    &mut self,
+    ui: &egui::Ui,
+    to_canvas: &impl Fn(Pos2) -> Pos2,
+    doc: &mut Document,
+    pressed: bool,
+    released: bool,
+    shift_down: bool,
+    origin: Option<Pos2>,
+  ) {
+    let (Some(stroke), Some((shape, pressure))) = (&mut self.stroke, &mut self.shape) else {
+      self.shape_edit = false;
+      return;
+    };
+    let mut changed = false;
+    if pressed && let Some(origin) = origin {
+      let at = to_canvas(origin);
+      // 16 points around the pointer, in canvas pixels.
+      let reach = (to_canvas(origin + vec2(16.0, 0.0)) - at).length();
+      self.shape_handle = shape.handles().iter().position(|&(x, y)| (Pos2::new(x, y) - at).length() < reach);
+      if self.shape_handle.is_none() {
+        self.end_shape(doc);
+        return;
+      }
+    }
+    if shift_down {
+      *shape = shape.perfect();
+      changed = true;
+    }
+    if let Some(index) = self.shape_handle
+      && let Some(p) = ui.input(|i| i.pointer.interact_pos()).map(to_canvas)
+      && shape.handles().get(index).is_some_and(|&(x, y)| (x, y) != (p.x, p.y))
+    {
+      shape.move_handle(index, (p.x, p.y));
+      changed = true;
+    }
+    if changed {
+      stroke.redraw(doc, &shape.outline(), *pressure);
+    }
+    if released {
+      self.shape_handle = None;
+    }
+  }
+
+  /// Fixes the edited shape: the stroke ends like any other.
+  fn end_shape(&mut self, doc: &mut Document) {
+    if let Some(stroke) = self.stroke.take() {
       self.last_point = stroke.finish(doc);
     }
+    (self.shape, self.shape_edit, self.shape_handle) = (None, false, None);
   }
 }
 

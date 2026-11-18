@@ -33,6 +33,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `X` | Swap primary and secondary colors | ✅ |
 | `D` | Reset colors to black and white | ✅ |
 | `Shift` + click | Straight line from the last point | ✅ |
+| `Shift` while a QuickShape snaps or is edited | Perfect shape: circle, regular polygon, 15° lines | ✅ |
 
 ## Edit and history
 
