@@ -149,3 +149,5 @@ ui-fill-all-layers = Tomar muestras de todas las capas visibles
 ui-gradient-linear = Lineal
 ui-gradient-radial = Radial
 ui-gradient-to-clear = Desvanecer a transparente en vez del color secundario
+ui-quickshape = QuickShape
+ui-quickshape-help = Mantén el puntero quieto al final de un trazo para convertirlo en una línea, elipse o polígono limpios.

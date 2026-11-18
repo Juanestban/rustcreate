@@ -102,6 +102,7 @@ impl App {
     let render_state = cc.wgpu_render_state.clone().expect("eframe runs on wgpu (ADR 0001)");
     let mut canvas = Canvas::new(&render_state, &doc);
     canvas.tools.library = library::Library::load();
+    canvas.tools.quickshape = settings.quickshape;
     pen::install(cc);
     ui::theme::install(&cc.egui_ctx);
     cc.egui_ctx.set_theme(theme_preference(settings.theme));
@@ -184,6 +185,7 @@ impl App {
     if settings.check_updates != self.settings.check_updates {
       self.updates.set_checks(settings.check_updates);
     }
+    self.canvas.tools.quickshape = settings.quickshape;
     settings.save();
     self.settings = settings;
   }

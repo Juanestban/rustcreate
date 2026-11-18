@@ -5,6 +5,7 @@ mod brush;
 mod file;
 mod fill;
 mod history;
+mod shape;
 pub mod tip;
 
 use std::collections::{HashMap, HashSet};
@@ -15,6 +16,7 @@ pub use file::{FORMAT, FileError};
 pub use fill::{Gradient, GradientKind};
 pub use history::History;
 use history::Snapshot;
+pub use shape::Shape;
 pub use tip::{Grain, Tip};
 
 /// Tile side in pixels.

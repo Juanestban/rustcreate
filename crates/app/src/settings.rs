@@ -26,11 +26,13 @@ pub struct Settings {
   pub check_updates: bool,
   /// The last size picked in "New canvas".
   pub canvas: (u32, u32),
+  /// Holding still at the end of a stroke snaps it to a clean shape.
+  pub quickshape: bool,
 }
 
 impl Default for Settings {
   fn default() -> Self {
-    Self { language: None, theme: Theme::Dark, check_updates: true, canvas: (2048, 1536) }
+    Self { language: None, theme: Theme::Dark, check_updates: true, canvas: (2048, 1536), quickshape: true }
   }
 }
 
@@ -75,7 +77,7 @@ mod tests {
 
   #[test]
   fn round_trips_and_fills_missing_fields() {
-    let settings = Settings { language: Some(Language::Es), theme: Theme::Light, check_updates: false, canvas: (800, 600) };
+    let settings = Settings { language: Some(Language::Es), theme: Theme::Light, check_updates: false, canvas: (800, 600), quickshape: false };
     let json = serde_json::to_string(&settings).unwrap();
     assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), settings);
     // An older file without the newer fields still loads.

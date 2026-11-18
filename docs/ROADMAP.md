@@ -14,10 +14,10 @@
   and the "New canvas" dialog. A native error dialog when no DX12/Vulkan GPU is found. **All
   v0.1 features are in.** Phase 2 started: Smudge tool, end taper, pulled-string stabilizer, brush tips and grains,
   Brush Studio, the brush library with saved brushes and a brush per tool, the paint bucket and the
-  gradient.
+  gradient, QuickShape.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: QuickShape; color disc, palettes and harmony; drawing
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: color disc, palettes and harmony; drawing
   guides; `.brushset`/`.abr` import.
 
 ## Phase 0 — Foundation
@@ -84,7 +84,10 @@
 - [x] Stabilization: StreamLine plus a pulled-string stabilizer; strokes catch up with the
       pointer when they end; per-brush settings in the brushes panel
 - [ ] Motion filtering (remove jitter from shaky hands or noisy tablets)
-- [ ] QuickShape (hold to snap lines, ellipses, polygons)
+- [x] QuickShape: holding still at the end of a stroke snaps it to a line, polyline, ellipse
+      or polygon drawn with the same brush (setting to turn it off)
+- [ ] QuickShape editing: drag the shape's handles after snapping; arcs; perfect circles and
+      squares with a second key
 - [x] Paint bucket with threshold, sampling the active layer or all visible layers, growing
       under antialiased edges; gradient tool (linear/radial, to the secondary color or to clear,
       dithered, live while dragging); Alt+Backspace fills the layer

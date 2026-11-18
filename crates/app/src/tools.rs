@@ -50,6 +50,8 @@ pub struct Tools {
   pub gradient: GradientKind,
   /// The gradient fades the primary color out instead of blending into the secondary.
   pub gradient_to_clear: bool,
+  /// QuickShape: a held stroke snaps to a clean shape (a setting).
+  pub quickshape: bool,
   /// Colors painted with, newest first.
   pub recent: Vec<[u8; 3]>,
 }
@@ -67,6 +69,7 @@ impl Default for Tools {
       fill_all_layers: true,
       gradient: GradientKind::Linear,
       gradient_to_clear: false,
+      quickshape: true,
       recent: Vec::new(),
     }
   }

@@ -149,3 +149,5 @@ ui-fill-all-layers = Sample all visible layers
 ui-gradient-linear = Linear
 ui-gradient-radial = Radial
 ui-gradient-to-clear = Fade to transparent instead of the secondary color
+ui-quickshape = QuickShape
+ui-quickshape-help = Hold still at the end of a stroke to turn it into a clean line, ellipse or polygon.

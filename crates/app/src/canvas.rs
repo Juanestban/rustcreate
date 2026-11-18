@@ -3,7 +3,11 @@
 
 use eframe::egui::{self, Event, Key, Modifiers, Pos2, Rect, Vec2, vec2};
 use eframe::egui_wgpu::{self, wgpu};
-use rustcreate_core::{Document, Gradient, Stroke};
+use rustcreate_core::{Document, Gradient, Shape, Stroke};
+
+/// QuickShape: how long the pointer must rest, and how far (points) it may drift meanwhile.
+const HOLD_SECONDS: f64 = 0.6;
+const HOLD_SLOP: f32 = 4.0;
 use rustcreate_render::{CanvasRenderer, Placement};
 
 use crate::tools::{Tool, Tools};
@@ -82,6 +86,10 @@ pub struct Canvas {
   pen: Option<f32>,
   /// A gradient being dragged: from where it started (screen, canvas) to where it is now.
   gradient: Option<(Gradient, Pos2, Pos2, Pos2)>,
+  /// QuickShape: when and where the pointer last moved during the stroke, and whether the
+  /// stroke already snapped to a shape (it then ignores the pointer until released).
+  hold: (f64, Pos2),
+  snapped: bool,
 }
 
 impl Canvas {
@@ -89,7 +97,7 @@ impl Canvas {
   pub fn new(render_state: &egui_wgpu::RenderState, doc: &Document) -> Self {
     let renderer = CanvasRenderer::new(&render_state.device, render_state.target_format, (doc.width, doc.height));
     render_state.renderer.write().callback_resources.insert(renderer);
-    Self { view: None, tools: Tools::default(), stroke: None, last_point: None, pen: None, gradient: None }
+    Self { view: None, tools: Tools::default(), stroke: None, last_point: None, pen: None, gradient: None, hold: (0.0, Pos2::ZERO), snapped: false }
   }
 
   /// A new or opened document: a renderer of its size, the view fitted again. Tools stay.
@@ -241,13 +249,32 @@ impl Canvas {
           _ => stroke.add(doc, p.x, p.y, pressure),
         }
         self.stroke = Some(stroke);
+        self.hold = (ui.input(|i| i.time), origin);
+        self.snapped = false;
       }
     }
-    if let Some(stroke) = &mut self.stroke {
+    if let Some(stroke) = &mut self.stroke
+      && !self.snapped
+    {
+      let now = ui.input(|i| i.time);
+      let pressure = moves.last().map_or(self.pen.unwrap_or(1.0), |&(_, pressure)| pressure);
       for (p, pressure) in moves {
+        if p.distance(self.hold.1) > HOLD_SLOP {
+          self.hold = (now, p);
+        }
         let p = to_canvas(p);
         stroke.add(doc, p.x, p.y, pressure);
       }
+      // QuickShape: holding still at the end snaps the stroke to the shape it looks like.
+      if self.tools.quickshape && self.tools.tool != Tool::Smudge && now - self.hold.0 >= HOLD_SECONDS {
+        if let Some(shape) = Shape::recognize(stroke.points()) {
+          stroke.redraw(doc, &shape.outline(), pressure);
+          self.snapped = true;
+        }
+        // Not a shape: try again after the next hold.
+        self.hold.0 = now;
+      }
+      ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
     if released && let Some(stroke) = self.stroke.take() {
       self.last_point = stroke.finish(doc);

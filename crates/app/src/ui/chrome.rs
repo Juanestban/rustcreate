@@ -217,6 +217,7 @@ impl App {
       ui.selectable_value(&mut settings.language, Some(Language::Es), "Español");
     });
     ui.checkbox(&mut settings.check_updates, self.i18n.tr("ui-check-updates"));
+    ui.checkbox(&mut settings.quickshape, self.i18n.tr("ui-quickshape")).on_hover_text(self.i18n.tr("ui-quickshape-help"));
     if settings != self.settings {
       self.apply(settings);
     }

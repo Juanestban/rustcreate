@@ -193,6 +193,8 @@ pub struct Stroke {
   direction: f32,
   /// Dabs placed so far, the seed of each dab's jitter.
   placed: u32,
+  /// Raw pointer samples, for QuickShape.
+  points: Vec<(f32, f32)>,
 }
 
 impl Document {
@@ -221,6 +223,7 @@ impl Document {
       pulled: None,
       direction: 0.0,
       placed: 0,
+      points: Vec::new(),
     })
   }
 
@@ -237,6 +240,7 @@ impl Stroke {
   pub fn add(&mut self, doc: &mut Document, x: f32, y: f32, pressure: f32) {
     let pressure = pressure.clamp(0.0, 1.0);
     self.pointer = Some((x, y, pressure));
+    self.points.push((x, y));
     // Pulled string: drag the string's end only as far as the pointer pulls it.
     let (x, y) = match self.pulled {
       Some((sx, sy)) if self.brush.string > 0.0 => {
@@ -311,6 +315,27 @@ impl Stroke {
       self.stamp(doc, d, scale, Some(&affected));
     }
     end
+  }
+
+  /// The pointer samples so far, unsmoothed.
+  pub fn points(&self) -> &[(f32, f32)] {
+    &self.points
+  }
+
+  /// Wipes what the stroke painted and paints `path` instead, unsmoothed, at `pressure`
+  /// (QuickShape). The stroke stays one undo step and can still be finished.
+  pub fn redraw(&mut self, doc: &mut Document, path: &[(f32, f32)], pressure: f32) {
+    if let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) {
+      for (key, tile) in self.tiles.drain() {
+        layer.tile_mut(key.0, key.1).copy_from_slice(&tile.before);
+      }
+    }
+    (self.last, self.pointer, self.pulled, self.smudged) = (None, None, None, None);
+    (self.travelled, self.carry, self.placed) = (0.0, 0.0, 0);
+    self.dabs.clear();
+    for pair in path.windows(2) {
+      self.line(doc, pair[0], pair[1], pressure);
+    }
   }
 
   /// Where the stroke is now, in canvas pixels.
@@ -665,6 +690,22 @@ mod tests {
     line(&mut doc, brush, false, (20.0, 30.0), (280.0, 30.0));
     let row: Vec<u8> = (30..270).map(|x| alpha(&doc, 0, x, 30)).collect();
     assert!(row.iter().any(|&a| a < 128) && row.iter().any(|&a| a > 200), "paper grain leaves gaps");
+  }
+
+  #[test]
+  fn quickshape_redraw_replaces_the_stroke() {
+    let mut doc = Document::new(300, 300);
+    let mut stroke = doc.begin_stroke(flat(6.0, 1.0), [0, 0, 0], false).unwrap();
+    for i in 0..50 {
+      stroke.add(&mut doc, 20.0 + i as f32 * 4.0, 150.0 + (i as f32).sin() * 30.0, 1.0);
+    }
+    assert_eq!(stroke.points().len(), 50);
+    stroke.redraw(&mut doc, &[(20.0, 50.0), (250.0, 50.0)], 1.0);
+    stroke.finish(&mut doc);
+    assert_eq!(alpha(&doc, 0, 130, 50), 255, "the clean line");
+    assert_eq!(alpha(&doc, 0, 100, 150), 0, "the wobbly stroke is gone");
+    assert!(doc.undo());
+    assert_eq!(alpha(&doc, 0, 130, 50), 0, "still one undo step");
   }
 
   #[test]
