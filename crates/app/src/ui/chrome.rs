@@ -8,6 +8,8 @@ use rustcreate_core::BlendMode;
 
 use super::icons::{self, Icon};
 use super::theme;
+use crate::i18n::Language;
+use crate::settings::Theme;
 use crate::tools::BRUSHES;
 use crate::{App, Pending};
 
@@ -169,7 +171,8 @@ impl App {
       ui.add(egui::Button::new(text).shortcut_text(shortcut).min_size(vec2(ui.available_width(), 30.0))).clicked()
     };
     if wide(ui, self.i18n.tr("ui-file-new"), "Ctrl+N") {
-      self.request(Pending::New);
+      self.new_canvas = Some(self.settings.canvas);
+      self.popover = None;
     }
     if wide(ui, self.i18n.tr("ui-file-open"), "Ctrl+O") {
       self.request(Pending::Open);
@@ -184,17 +187,27 @@ impl App {
       self.export_png();
     }
     ui.separator();
-    ui.label(RichText::new(self.i18n.tr("ui-theme")).color(theme::palette(ui).muted));
+    // Settings: applied and saved as soon as they change.
+    let mut settings = self.settings.clone();
+    let muted = theme::palette(ui).muted;
+    ui.label(RichText::new(self.i18n.tr("ui-settings")).strong());
+    ui.label(RichText::new(self.i18n.tr("ui-theme")).color(muted));
     ui.horizontal(|ui| {
-      let mut preference = ui.ctx().options(|o| o.theme_preference);
-      let before = preference;
-      ui.selectable_value(&mut preference, egui::ThemePreference::System, self.i18n.tr("ui-theme-system"));
-      ui.selectable_value(&mut preference, egui::ThemePreference::Dark, self.i18n.tr("ui-theme-dark"));
-      ui.selectable_value(&mut preference, egui::ThemePreference::Light, self.i18n.tr("ui-theme-light"));
-      if preference != before {
-        ui.ctx().set_theme(preference);
-      }
+      ui.selectable_value(&mut settings.theme, Theme::System, self.i18n.tr("ui-theme-system"));
+      ui.selectable_value(&mut settings.theme, Theme::Dark, self.i18n.tr("ui-theme-dark"));
+      ui.selectable_value(&mut settings.theme, Theme::Light, self.i18n.tr("ui-theme-light"));
     });
+    ui.label(RichText::new(self.i18n.tr("ui-language")).color(muted));
+    ui.horizontal(|ui| {
+      ui.selectable_value(&mut settings.language, None, self.i18n.tr("ui-theme-system"));
+      // Language names are written in their own language, not translated.
+      ui.selectable_value(&mut settings.language, Some(Language::En), "English");
+      ui.selectable_value(&mut settings.language, Some(Language::Es), "Español");
+    });
+    ui.checkbox(&mut settings.check_updates, self.i18n.tr("ui-check-updates"));
+    if settings != self.settings {
+      self.apply(settings);
+    }
     ui.separator();
     ui.label(RichText::new(format!("rustcreate {}", env!("CARGO_PKG_VERSION"))).small().color(theme::palette(ui).muted));
   }

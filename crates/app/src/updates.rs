@@ -1,6 +1,7 @@
 //! Runs the updater on a background thread: checks at startup and every 5 hours, and installs
 //! only when asked (ADR 0002). The UI reads `status()` each frame.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -25,10 +26,14 @@ pub enum Status {
 pub struct Updates {
   status: Arc<Mutex<Status>>,
   install: Sender<Update>,
+  /// Settings → "Check for updates" (ADR 0002).
+  checks: Arc<AtomicBool>,
 }
 
 impl Updates {
-  pub fn start(ctx: egui::Context) -> Self {
+  pub fn start(ctx: egui::Context, checks: bool) -> Self {
+    let checks = Arc::new(AtomicBool::new(checks));
+    let enabled = checks.clone();
     let status = Arc::new(Mutex::new(Status::Idle));
     let (install, requests) = mpsc::channel::<Update>();
     let shared = status.clone();
@@ -42,7 +47,10 @@ impl Updates {
       };
       loop {
         // A failed check stays quiet: it is retried on the next round.
-        if let Ok(Some(found)) = runtime.block_on(updater.check(kind)) {
+        // shortcut: turning checks back on waits for the next 5 h round, add a wake-up if users ask.
+        if enabled.load(Ordering::Relaxed)
+          && let Ok(Some(found)) = runtime.block_on(updater.check(kind))
+        {
           set(Status::Available(found));
         }
         match requests.recv_timeout(CHECK_EVERY) {
@@ -59,7 +67,7 @@ impl Updates {
         }
       }
     });
-    Self { status, install }
+    Self { status, install, checks }
   }
 
   pub fn status(&self) -> Status {
@@ -68,6 +76,10 @@ impl Updates {
 
   pub fn install(&self, update: Update) {
     let _ = self.install.send(update);
+  }
+
+  pub fn set_checks(&self, on: bool) {
+    self.checks.store(on, Ordering::Relaxed);
   }
 
   /// "Later": hide the banner until the next check finds a version.

@@ -10,11 +10,11 @@
   Painting with the mouse: brush engine, Pencil/Ink/Airbrush/Eraser. Procreate-like interface:
   top bar, sidebar sliders, brush/layers/color/actions panels, own icons, dark/light palette,
   file dialogs, unsaved-changes prompt, all v0.1 Photoshop shortcuts. Pen input through
-  Windows Ink (pressure, eraser end, barrel button).
+  Windows Ink (pressure, eraser end, barrel button). Settings (language, theme, update checks)
+  and the "New canvas" dialog.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** Settings (language, theme, update checks, remembered) and the "New canvas" dialog,
-  then the clear "no GPU" error. That closes v0.1.
+- **Next:** the clear "no GPU" error, the last v0.1 item; then test on Windows and tag v0.1.0.
 
 ## Phase 0 — Foundation
 
@@ -46,8 +46,7 @@
 
 ### App (`crates/app`)
 - [x] Procreate-like layout: top bar, side size/opacity sliders, floating panels, `Tab` hides it
-- [x] Dark and light themes with an own palette (dark by default, switch in Actions; not
-      remembered until Settings exist)
+- [x] Dark and light themes with an own palette (dark by default, chosen in Settings)
 - [x] Own minimalist icon set (vector line icons painted in code, `ui/icons.rs`)
 - [x] Brush picker, layers panel (visibility, lock, rename, opacity, blend, duplicate, merge,
       delete), color picker (HSV square + history) and eyedropper
@@ -56,7 +55,9 @@
 - [x] Photoshop shortcuts marked ✅ in `SHORTCUTS.md`
 - [x] Fluent texts in English and Spanish (system language; test checks both files match)
 - [x] Updater: check at startup and every 5 h, banner, verified install (ADR 0002)
-- [ ] Settings: turn automatic update checks off, pick language and theme
+- [x] Settings (in Actions, saved to `settings.json` in the user config folder): language,
+      theme, automatic update checks
+- [x] "New canvas" dialog: presets, custom size capped by the GPU, remembers the last size
 - [x] Unsaved-changes prompt on close, new, open and before updating; Open/Save/Export dialogs
 - [ ] Clear error when no DX12/Vulkan GPU is available
 

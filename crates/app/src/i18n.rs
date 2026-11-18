@@ -4,7 +4,8 @@
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource, FluentValue};
 use unic_langid::LanguageIdentifier;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Language {
   Es,
   En,

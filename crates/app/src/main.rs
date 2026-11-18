@@ -3,17 +3,20 @@
 mod canvas;
 mod i18n;
 mod pen;
+mod settings;
 mod tools;
 mod ui;
 mod update;
 mod updates;
 
 use canvas::Canvas;
+use eframe::egui::RichText;
 use eframe::{egui, egui_wgpu};
-use i18n::{I18n, Language};
+use i18n::I18n;
 use std::path::PathBuf;
 
 use rustcreate_core::Document;
+use settings::{Settings, Theme};
 use ui::chrome::Popover;
 use updates::{Status, Updates};
 
@@ -29,7 +32,7 @@ fn main() -> eframe::Result {
 
 /// Something that would drop unsaved changes, held until the user answers "Save changes?".
 pub(crate) enum Pending {
-  New,
+  New(u32, u32),
   Open,
   Close,
   Install(update::Update),
@@ -54,27 +57,36 @@ pub(crate) struct App {
   /// Tab hides the interface.
   hidden: bool,
   confirm: Option<Pending>,
+  settings: Settings,
+  /// The "New canvas" dialog and the size typed in it.
+  new_canvas: Option<(u32, u32)>,
   error: Option<String>,
   closing: bool,
   title: String,
 }
 
-/// shortcut: a fixed size until the "New canvas" dialog and the gallery exist.
-const NEW_CANVAS: (u32, u32) = (2048, 1536);
+/// Common canvas sizes for the "New canvas" dialog, with their name tokens.
+const PRESETS: [(&str, (u32, u32)); 5] = [
+  ("ui-canvas-screen", (2048, 1536)),
+  ("ui-canvas-hd", (1920, 1080)),
+  ("ui-canvas-4k", (3840, 2160)),
+  ("ui-canvas-square", (2048, 2048)),
+  ("ui-canvas-a4", (2480, 3508)),
+];
 
 impl App {
   fn new(cc: &eframe::CreationContext) -> Self {
-    let doc = Document::new(NEW_CANVAS.0, NEW_CANVAS.1);
+    let settings = Settings::load();
+    let doc = Document::new(settings.canvas.0, settings.canvas.1);
     let render_state = cc.wgpu_render_state.clone().expect("eframe runs on wgpu (ADR 0001)");
     let canvas = Canvas::new(&render_state, &doc);
     pen::install(cc);
     ui::theme::install(&cc.egui_ctx);
-    // shortcut: dark by default and not remembered until Settings exist.
-    cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+    cc.egui_ctx.set_theme(theme_preference(settings.theme));
     Self {
       ctx: cc.egui_ctx.clone(),
-      i18n: I18n::new(Language::system()),
-      updates: Updates::start(cc.egui_ctx.clone()),
+      i18n: I18n::new(settings.language()),
+      updates: Updates::start(cc.egui_ctx.clone(), settings.check_updates),
       render_state,
       saved: doc.revision(),
       doc,
@@ -85,6 +97,8 @@ impl App {
       editing_slider: false,
       hidden: false,
       confirm: None,
+      settings,
+      new_canvas: None,
       error: None,
       closing: false,
       title: String::new(),
@@ -106,10 +120,14 @@ impl App {
 
   fn perform(&mut self, action: Pending) {
     match action {
-      Pending::New => self.replace(Document::new(NEW_CANVAS.0, NEW_CANVAS.1), None),
+      Pending::New(width, height) => self.replace(Document::new(width, height), None),
       Pending::Open => {
         let Some(path) = rfd::FileDialog::new().add_filter("rustcreate", &["rcreate"]).pick_file() else { return };
         match Document::open(&path) {
+          Ok(doc) if doc.width.max(doc.height) > self.max_side() => {
+            let error = format!("{} × {} > {}", doc.width, doc.height, self.max_side());
+            self.error = Some(self.i18n.tr_args("ui-error-open", &[("error", error.into())]));
+          }
           Ok(doc) => self.replace(doc, Some(path)),
           Err(error) => self.error = Some(self.i18n.tr_args("ui-error-open", &[("error", error.to_string().into())])),
         }
@@ -120,6 +138,27 @@ impl App {
       }
       Pending::Install(update) => self.updates.install(update),
     }
+  }
+
+  /// The largest canvas side this GPU can hold as one texture (ADR 0001).
+  fn max_side(&self) -> u32 {
+    self.render_state.device.limits().max_texture_dimension_2d.min(rustcreate_core::MAX_SIDE)
+  }
+
+  /// Applies changed settings right away and saves them.
+  pub(crate) fn apply(&mut self, settings: Settings) {
+    if settings.theme != self.settings.theme {
+      self.ctx.set_theme(theme_preference(settings.theme));
+    }
+    if settings.language != self.settings.language {
+      self.i18n = I18n::new(settings.language());
+      self.title.clear();
+    }
+    if settings.check_updates != self.settings.check_updates {
+      self.updates.set_checks(settings.check_updates);
+    }
+    settings.save();
+    self.settings = settings;
   }
 
   fn replace(&mut self, doc: Document, path: Option<PathBuf>) {
@@ -164,7 +203,7 @@ impl App {
 
   /// File and interface shortcuts (docs/SHORTCUTS.md). The longer combinations go first.
   fn shortcuts(&mut self, ctx: &egui::Context) {
-    if ctx.egui_wants_keyboard_input() || self.confirm.is_some() {
+    if ctx.egui_wants_keyboard_input() || self.confirm.is_some() || self.new_canvas.is_some() {
       return;
     }
     let (m, shift, alt) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT, egui::Modifiers::ALT);
@@ -182,7 +221,7 @@ impl App {
       self.request(Pending::Open);
     }
     if key(m, egui::Key::N) {
-      self.request(Pending::New);
+      self.new_canvas = Some(self.settings.canvas);
     }
     if key(egui::Modifiers::NONE, egui::Key::Tab) {
       self.hidden = !self.hidden;
@@ -190,7 +229,49 @@ impl App {
     }
   }
 
+  fn new_canvas_dialog(&mut self, ctx: &egui::Context) {
+    let Some((mut width, mut height)) = self.new_canvas else { return };
+    let max = self.max_side();
+    let (mut create, mut cancel) = (false, false);
+    egui::Modal::new(egui::Id::unique("new-canvas")).show(ctx, |ui| {
+      ui.set_width(320.0);
+      ui.heading(self.i18n.tr("ui-file-new"));
+      ui.add_space(6.0);
+      for (name, size) in PRESETS {
+        let label = format!("{}  ·  {} × {}", self.i18n.tr(name), size.0, size.1);
+        if ui.selectable_label((width, height) == size, label).clicked() {
+          (width, height) = size;
+        }
+      }
+      ui.add_space(6.0);
+      ui.horizontal(|ui| {
+        ui.label(self.i18n.tr("ui-canvas-width"));
+        ui.add(egui::DragValue::new(&mut width).range(1..=max).suffix(" px"));
+        if ui.button("⇄").on_hover_text(self.i18n.tr("ui-canvas-swap")).clicked() {
+          std::mem::swap(&mut width, &mut height);
+        }
+        ui.label(self.i18n.tr("ui-canvas-height"));
+        ui.add(egui::DragValue::new(&mut height).range(1..=max).suffix(" px"));
+      });
+      ui.label(RichText::new(self.i18n.tr_args("ui-canvas-max", &[("max", max.into())])).small().weak());
+      ui.add_space(10.0);
+      ui.horizontal(|ui| {
+        create = ui.button(self.i18n.tr("ui-canvas-create")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter));
+        cancel = ui.button(self.i18n.tr("ui-cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
+      });
+    });
+    self.new_canvas = Some((width, height));
+    if cancel {
+      self.new_canvas = None;
+    } else if create {
+      self.new_canvas = None;
+      self.apply(Settings { canvas: (width, height), ..self.settings.clone() });
+      self.request(Pending::New(width, height));
+    }
+  }
+
   fn dialogs(&mut self, ctx: &egui::Context) {
+    self.new_canvas_dialog(ctx);
     if self.confirm.is_some() {
       let mut answer = None;
       egui::Modal::new(egui::Id::unique("unsaved")).show(ctx, |ui| {
@@ -303,5 +384,13 @@ impl App {
         Status::Quit => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close),
       });
     });
+  }
+}
+
+fn theme_preference(theme: Theme) -> egui::ThemePreference {
+  match theme {
+    Theme::System => egui::ThemePreference::System,
+    Theme::Dark => egui::ThemePreference::Dark,
+    Theme::Light => egui::ThemePreference::Light,
   }
 }
