@@ -1,0 +1,23 @@
+[package]
+name = "rustcreate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rustcreate-core.workspace = true
+eframe.workspace = true
+fluent-bundle.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sys-locale.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+unic-langid.workspace = true
+
+[target.'cfg(windows)'.build-dependencies]
+resvg.workspace = true
+winresource.workspace = true

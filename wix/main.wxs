@@ -1,0 +1,59 @@
+<!--
+  rustcreate installer (WiX 5). Per-user: installs to %LOCALAPPDATA%\Programs\rustcreate
+  with a Start menu shortcut and never asks for administrator rights (ADR 0002).
+  Built by scripts/package.ps1, which passes Version, ExePath and IconPath.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="rustcreate"
+    Manufacturer="rustcreate"
+    Version="$(var.Version)"
+    UpgradeCode="F0DCDA57-B18B-4239-B8DB-249C00B31B46"
+    Scope="perUser"
+    Compressed="yes">
+
+    <!-- Installing a newer version replaces the old one. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of rustcreate is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="rustcreate" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <ComponentGroup Id="App" Directory="INSTALLFOLDER">
+      <Component Id="Executable" Guid="0A9BCC77-78CF-4660-B22F-CEE318FDE081">
+        <File Id="RustcreateExe" Source="$(var.ExePath)" Name="rustcreate.exe" />
+        <!-- Per-user components need an HKCU key path. -->
+        <RegistryValue Root="HKCU" Key="Software\rustcreate" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+        <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+        <RemoveFolder Id="RemoveProgramsFolder" Directory="ProgramsFolder" On="uninstall" />
+      </Component>
+      <Component Id="StartMenuShortcut">
+        <Shortcut
+          Id="RustcreateShortcut"
+          Directory="ProgramMenuFolder"
+          Name="rustcreate"
+          Target="[INSTALLFOLDER]rustcreate.exe"
+          WorkingDirectory="INSTALLFOLDER"
+          Icon="AppIcon" />
+        <RegistryValue Root="HKCU" Key="Software\rustcreate" Name="shortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- After an in-app update (msiexec ... LAUNCHAPP=1), start the new version. -->
+    <CustomAction Id="LaunchAfterUpdate" FileRef="RustcreateExe" ExeCommand="--after-update" Return="asyncNoWait" Impersonate="yes" Execute="immediate" />
+    <InstallExecuteSequence>
+      <Custom Action="LaunchAfterUpdate" After="InstallFinalize" Condition="LAUNCHAPP = 1 AND NOT REMOVE" />
+    </InstallExecuteSequence>
+
+    <Feature Id="Main">
+      <ComponentGroupRef Id="App" />
+    </Feature>
+  </Package>
+</Wix>

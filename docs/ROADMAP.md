@@ -1,0 +1,94 @@
+# Roadmap
+
+## Current status
+
+- **Done:** project foundation (licenses, docs, ADRs 0001–0006, graphify setup), app icon,
+  CI and release packaging copied from archi-games. App skeleton: eframe window with the icon,
+  system dark/light theme, Fluent `en`/`es`, updater (startup + every 5 h, banner, verified
+  install). `core` has tiled layers and the document type.
+- **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
+  Windows/CI; the first push to GitHub will exercise them.
+- **Next:** layer stack operations and history in `crates/core`, then create `crates/render`
+  (wgpu canvas) — the crate is added with its first real code.
+
+## Phase 0 — Foundation
+
+- [x] Licenses (MIT OR Apache-2.0), README, RELEASING, NOTICE
+- [x] `docs/DESIGN.md`, `docs/SHORTCUTS.md`, ADRs 0001–0006
+- [x] `CLAUDE.md`, graphify `Stop` hook, `.gitignore` for graphify output
+- [x] App icon (SVG source, PNG, `.ico` from `build.rs`)
+- [x] CI (`ci.yml`) and release (`release.yml`, `scripts/package.ps1`, WiX MSI)
+
+## Phase 1 — v0.1 (Windows)
+
+### Core (`crates/core`)
+- [x] Tiled RGBA8 layers (256×256, lazy allocation)
+- [ ] Layer stack: add, delete, duplicate, reorder, merge down, rename
+- [ ] Layer properties: opacity, hidden, locked, blend mode (Normal, Multiply, Screen, Overlay,
+      Darken, Lighten, Add, Color Dodge, Color Burn)
+- [ ] History: tile snapshots, 250 steps, memory cap
+- [ ] `.rcreate` save/open (atomic save), PNG export
+
+### Render (`crates/render`)
+- [ ] wgpu canvas sharing eframe's device (paint callback)
+- [ ] Zoom, pan, rotate view
+- [ ] Brush engine: dab stamping with spacing, size/opacity from pressure, taper, streamline
+- [ ] Brushes: Pencil, Ink, Airbrush, Eraser
+- [ ] Layer compositor with blend-mode shaders
+- [ ] Dirty-tile uploads
+
+### App (`crates/app`)
+- [ ] Procreate-like layout: top bar, side size/opacity sliders, floating panels
+- [ ] Dark and light themes (system by default; egui's built-in themes work, own palette pending)
+- [ ] Own minimalist SVG icon set
+- [ ] Brush picker, layers panel, color picker (disc + HSB + history)
+- [ ] Pen input through Windows Ink (`WM_POINTER`), mouse fallback
+- [ ] Photoshop shortcuts marked ✅ in `SHORTCUTS.md`
+- [x] Fluent texts in English and Spanish (system language; test checks both files match)
+- [x] Updater: check at startup and every 5 h, banner, verified install (ADR 0002)
+- [ ] Settings: turn automatic update checks off, pick language and theme
+- [ ] Unsaved-changes prompt on close and before updating
+- [ ] Clear error when no DX12/Vulkan GPU is available
+
+## Phase 2 — Painting depth
+
+- [ ] Full brush library by category (Sketching, Inking, Drawing, Painting, Artistic,
+      Calligraphy, Airbrushing, Textures, Abstract, Charcoals, Elements, Spraypaints…)
+- [ ] Brush Studio: edit every parameter, grain and shape textures, live preview
+- [ ] Smudge tool and wet mixing
+- [ ] Stabilization modes (StreamLine, motion filtering)
+- [ ] QuickShape (hold to snap lines, ellipses, polygons)
+- [ ] Paint bucket (ColorDrop) with threshold, gradient tool
+- [ ] Eyedropper loupe, color palettes, harmony modes
+- [ ] Drawing guides: grid, perspective (1/2/3 point), symmetry
+- [ ] Import `.brushset` and `.abr` brushes the user owns
+
+## Phase 3 — Photoshop-grade editing
+
+- [ ] Selections: marquee, lasso, magic wand, feather, invert, save
+- [ ] Transform: free, uniform, distort, warp, liquify
+- [ ] Layer masks and clipping masks, Alpha Lock
+- [ ] Layer groups with their own blend mode and opacity
+- [ ] Adjustment layers: levels, curves, hue/saturation, color balance, gradient map
+- [ ] Filters: Gaussian/motion blur, sharpen, noise, chromatic aberration
+- [ ] Text layers
+- [ ] All blend modes (Soft/Hard/Vivid/Linear Light, Difference, Exclusion, Hue, Saturation,
+      Color, Luminosity…)
+- [ ] 16-bit channels and color management (Display P3, ICC)
+- [ ] PSD import/export, JPEG/WebP/TIFF export
+- [ ] Reference window, time-lapse recording
+
+## Phase 4 — Animation
+
+- [ ] Animation Assist: timeline of frames (one layer or group per frame)
+- [ ] Onion skin (frames, opacity, colors), hold frames, background/foreground frames
+- [ ] Playback: loop, ping-pong, one-shot; frames per second
+- [ ] Export GIF, MP4, animated PNG, PNG sequence
+
+## Phase 5 — More platforms
+
+- [ ] Wintab pen input (older tablets)
+- [ ] macOS (Metal), Apple Pencil on iPad/iPhone
+- [ ] Android (Vulkan, stylus)
+- [ ] Linux (Wayland/X11 tablets)
+- [ ] Touch gestures: two-finger undo, three-finger redo, pinch zoom/rotate
