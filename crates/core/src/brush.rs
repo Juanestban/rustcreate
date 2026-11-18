@@ -9,6 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::tip::{self, Grain, Tip};
 use crate::{Document, TILE};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -39,6 +40,24 @@ pub struct Brush {
   /// Pulled-string stabilizer (Photoshop): the brush only moves once the pointer is this many
   /// pixels away, so small wobbles never reach the canvas. 0 = off.
   pub string: f32,
+  /// The dab's shape.
+  pub tip: Tip,
+  /// Tip rotation in degrees.
+  pub angle: f32,
+  /// Turn the tip with the stroke's direction (added to `angle`).
+  pub follow: bool,
+  /// 0..=1, random rotation per dab (1 = up to ±180°).
+  pub angle_jitter: f32,
+  /// Random offset per dab, as a fraction of the diameter.
+  pub scatter: f32,
+  /// 0..=1, random shrink per dab.
+  pub size_jitter: f32,
+  /// Texture the paint catches on, fixed to the canvas.
+  pub grain: Grain,
+  /// Grain zoom: 1 = one texture pixel per canvas pixel.
+  pub grain_scale: f32,
+  /// 0..=1, how much the grain holds paint back.
+  pub grain_depth: f32,
 }
 
 impl Brush {
@@ -56,6 +75,15 @@ impl Brush {
       taper_end: 0.0,
       streamline: 0.1,
       string: 0.0,
+      tip: Tip::Round,
+      angle: 0.0,
+      follow: false,
+      angle_jitter: 0.0,
+      scatter: 0.0,
+      size_jitter: 0.0,
+      grain: Grain::Paper,
+      grain_scale: 1.0,
+      grain_depth: 0.55,
     }
   }
 
@@ -73,6 +101,15 @@ impl Brush {
       taper_end: 40.0,
       streamline: 0.4,
       string: 0.0,
+      tip: Tip::Round,
+      angle: 0.0,
+      follow: false,
+      angle_jitter: 0.0,
+      scatter: 0.0,
+      size_jitter: 0.0,
+      grain: Grain::None,
+      grain_scale: 1.0,
+      grain_depth: 0.0,
     }
   }
 
@@ -90,6 +127,15 @@ impl Brush {
       taper_end: 0.0,
       streamline: 0.0,
       string: 0.0,
+      tip: Tip::Round,
+      angle: 0.0,
+      follow: false,
+      angle_jitter: 0.0,
+      scatter: 0.0,
+      size_jitter: 0.0,
+      grain: Grain::None,
+      grain_scale: 1.0,
+      grain_depth: 0.0,
     }
   }
 }
@@ -102,6 +148,10 @@ struct Dab {
   pressure: f32,
   /// Path length at this dab, for the tapers.
   at: f32,
+  /// Tip rotation in radians, after direction and jitter.
+  angle: f32,
+  /// Size multiplier from the size jitter.
+  size: f32,
 }
 
 /// A tile touched by the stroke: its pixels before the stroke and the stroke's coverage.
@@ -131,6 +181,10 @@ pub struct Stroke {
   pointer: Option<(f32, f32, f32)>,
   /// Pulled string: the end of the string the pointer drags.
   pulled: Option<(f32, f32)>,
+  /// The stroke's direction in radians, for tips that follow it.
+  direction: f32,
+  /// Dabs placed so far, the seed of each dab's jitter.
+  placed: u32,
 }
 
 impl Document {
@@ -157,6 +211,8 @@ impl Document {
       dabs: Vec::new(),
       pointer: None,
       pulled: None,
+      direction: 0.0,
+      placed: 0,
     })
   }
 
@@ -257,6 +313,9 @@ impl Stroke {
   /// Dabs from `a` to `b` every `spacing × diameter`, interpolating the pressure.
   fn segment(&mut self, doc: &mut Document, a: (f32, f32, f32), b: (f32, f32, f32)) {
     let length = (b.0 - a.0).hypot(b.1 - a.1);
+    if length > 0.0 {
+      self.direction = (b.1 - a.1).atan2(b.0 - a.0);
+    }
     let mut at = self.carry;
     while at <= length {
       let t = if length > 0.0 { at / length } else { 1.0 };
@@ -276,31 +335,53 @@ impl Stroke {
     (self.brush.size * pressure * (0.15 + 0.85 * taper)).max(1.0)
   }
 
-  /// Stamps one dab centered at (x, y) and remembers it.
+  /// Places one dab at (x, y) with the brush's jitter, stamps it and remembers it.
   fn dab(&mut self, doc: &mut Document, x: f32, y: f32, pressure: f32) {
+    let b = self.brush;
+    let seed = self.placed.wrapping_mul(4);
+    self.placed += 1;
+    // -1..1 from the dab's seed; the same stroke always gets the same jitter.
+    let random = |k: u32| tip::unit(seed + k) * 2.0 - 1.0;
+    let diameter = self.diameter(pressure, self.travelled);
+    let (r, a) = (b.scatter * diameter * random(0).abs().sqrt(), random(1) * std::f32::consts::PI);
+    let angle = b.angle.to_radians() + if b.follow { self.direction } else { 0.0 } + random(2) * b.angle_jitter * std::f32::consts::PI;
+    let size = 1.0 - b.size_jitter.clamp(0.0, 1.0) * (random(3) * 0.5 + 0.5);
+    let dab = Dab { x: x + r * a.cos(), y: y + r * a.sin(), pressure, at: self.travelled, angle, size };
     if self.smudge {
-      return self.smudge_dab(doc, x, y, pressure);
+      return self.smudge_dab(doc, dab);
     }
-    let dab = Dab { x, y, pressure, at: self.travelled };
     self.dabs.push(dab);
     self.stamp(doc, dab, 1.0, None);
   }
 
+  /// How much dab `d` of `radius` covers canvas pixel (px, py): tip shape × grain.
+  fn shape(brush: &Brush, d: &Dab, radius: f32, px: u32, py: u32) -> f32 {
+    let (dx, dy) = (px as f32 + 0.5 - d.x, py as f32 + 0.5 - d.y);
+    let (sin, cos) = d.angle.sin_cos();
+    let (x, y) = ((dx * cos + dy * sin) / radius, (dy * cos - dx * sin) / radius);
+    let shape = brush.tip.coverage(x, y, brush.hardness, radius);
+    if shape <= 0.0 || brush.grain == Grain::None {
+      return shape;
+    }
+    let grain = brush.grain.value(px as f32, py as f32, brush.grain_scale);
+    shape * (1.0 - brush.grain_depth.clamp(0.0, 1.0) * (1.0 - grain))
+  }
+
+  /// The pixel box a dab of `radius` can touch, clipped to the canvas; `None` if off-canvas.
+  fn bounds(&self, d: &Dab, radius: f32, width: u32, height: u32) -> Option<(u32, u32, u32, u32)> {
+    let reach = radius * self.brush.tip.reach();
+    let (x0, y0) = ((d.x - reach).floor().max(0.0), (d.y - reach).floor().max(0.0));
+    let (x1, y1) = ((d.x + reach).ceil().min(width as f32 - 1.0), (d.y + reach).ceil().min(height as f32 - 1.0));
+    (x1 >= x0 && y1 >= y0).then_some((x0 as u32, y0 as u32, x1 as u32, y1 as u32))
+  }
+
   /// Stamps `d` at `scale` × its size, only into the `only` tiles when given.
   fn stamp(&mut self, doc: &mut Document, d: Dab, scale: f32, only: Option<&HashSet<(u32, u32)>>) {
-    let Dab { x, y, pressure, .. } = d;
+    let radius = (self.diameter(d.pressure, d.at) * scale * d.size).max(1.0) / 2.0;
+    let Some((x0, y0, x1, y1)) = self.bounds(&d, radius, doc.width, doc.height) else { return };
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
-    let radius = (self.diameter(pressure, d.at) * scale).max(1.0) / 2.0;
-    let flow = self.brush.flow * (1.0 - self.brush.pressure_flow * (1.0 - pressure));
+    let flow = self.brush.flow * (1.0 - self.brush.pressure_flow * (1.0 - d.pressure));
     let opacity = self.brush.opacity.clamp(0.0, 1.0);
-    // Soft part of the edge; at least one pixel so hard edges are antialiased.
-    let inner = (radius * self.brush.hardness.clamp(0.0, 1.0)).min(radius - 1.0).max(0.0);
-    let (x0, y0) = ((x - radius).floor().max(0.0) as u32, (y - radius).floor().max(0.0) as u32);
-    let (x1, y1) = ((x + radius).ceil().min(doc.width as f32 - 1.0), (y + radius).ceil().min(doc.height as f32 - 1.0));
-    if x1 < x0 as f32 || y1 < y0 as f32 || x1 < 0.0 || y1 < 0.0 {
-      return;
-    }
-    let (x1, y1) = (x1 as u32, y1 as u32);
     for ty in y0 / TILE..=y1 / TILE {
       for tx in x0 / TILE..=x1 / TILE {
         if only.is_some_and(|only| !only.contains(&(tx, ty))) {
@@ -310,7 +391,7 @@ impl Stroke {
         let tile = self.tiles.entry((tx, ty)).or_insert_with(|| StrokeTile { before: pixels.to_vec(), coverage: vec![0.0; (TILE * TILE) as usize] });
         for py in y0.max(ty * TILE)..=y1.min(ty * TILE + TILE - 1) {
           for px in x0.max(tx * TILE)..=x1.min(tx * TILE + TILE - 1) {
-            let falloff = falloff((px as f32 + 0.5 - x).hypot(py as f32 + 0.5 - y), inner, radius);
+            let falloff = Self::shape(&self.brush, &d, radius, px, py);
             if falloff <= 0.0 {
               continue;
             }
@@ -339,19 +420,14 @@ impl Stroke {
   }
 
   /// Moves the paint under the previous dab to (x, y), blended by the brush's shape × strength.
-  fn smudge_dab(&mut self, doc: &mut Document, x: f32, y: f32, pressure: f32) {
-    let Some((from_x, from_y)) = self.smudged.replace((x, y)) else { return };
+  fn smudge_dab(&mut self, doc: &mut Document, d: Dab) {
+    let Some((from_x, from_y)) = self.smudged.replace((d.x, d.y)) else { return };
     let (width, height) = (doc.width, doc.height);
+    let radius = (self.diameter(d.pressure, d.at) * d.size).max(1.0) / 2.0;
+    let Some((x0, y0, x1, y1)) = self.bounds(&d, radius, width, height) else { return };
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
-    let radius = self.diameter(pressure, self.travelled) / 2.0;
-    let strength = self.brush.opacity.clamp(0.0, 1.0) * (1.0 - self.brush.pressure_flow * (1.0 - pressure));
-    let inner = (radius * self.brush.hardness.clamp(0.0, 1.0)).min(radius - 1.0).max(0.0);
-    let (x0, y0) = ((x - radius).floor().max(0.0) as u32, (y - radius).floor().max(0.0) as u32);
-    let (x1, y1) = ((x + radius).ceil().min(width as f32 - 1.0), (y + radius).ceil().min(height as f32 - 1.0));
-    if x1 < x0 as f32 || y1 < y0 as f32 {
-      return;
-    }
-    let (x1, y1) = (x1 as u32, y1 as u32);
+    let strength = self.brush.opacity.clamp(0.0, 1.0) * (1.0 - self.brush.pressure_flow * (1.0 - d.pressure));
+    let (x, y) = (d.x, d.y);
     // Copy the source patch first: it can overlap the pixels about to change.
     let (dx, dy) = ((from_x - x).round() as i64, (from_y - y).round() as i64);
     let read = |layer: &crate::Layer, px: u32, py: u32| -> [u8; 4] {
@@ -375,7 +451,7 @@ impl Stroke {
         let pixels = layer.tile_mut(tx, ty);
         for py in rows.clone() {
           for px in cols.clone() {
-            let weight = falloff((px as f32 + 0.5 - x).hypot(py as f32 + 0.5 - y), inner, radius) * strength;
+            let weight = Self::shape(&self.brush, &d, radius, px, py) * strength;
             if weight <= 0.0 {
               continue;
             }
@@ -391,19 +467,10 @@ impl Stroke {
   }
 }
 
-/// A dab's smoothstep edge: 1 inside `inner`, 0 at `radius`.
-fn falloff(distance: f32, inner: f32, radius: f32) -> f32 {
-  if distance <= inner {
-    1.0
-  } else {
-    let t = ((distance - inner) / (radius - inner).max(1e-3)).clamp(0.0, 1.0);
-    1.0 - t * t * (3.0 - 2.0 * t)
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::{Grain, Tip};
 
   fn alpha(doc: &Document, layer: usize, x: u32, y: u32) -> u8 {
     doc.layers()[layer].tile(x / TILE, y / TILE).map_or(0, |t| t[(((y % TILE) * TILE + x % TILE) * 4 + 3) as usize])
@@ -431,6 +498,15 @@ mod tests {
       taper_end: 0.0,
       streamline: 0.0,
       string: 0.0,
+      tip: Tip::Round,
+      angle: 0.0,
+      follow: false,
+      angle_jitter: 0.0,
+      scatter: 0.0,
+      size_jitter: 0.0,
+      grain: Grain::None,
+      grain_scale: 1.0,
+      grain_depth: 0.0,
     }
   }
 
@@ -566,6 +642,24 @@ mod tests {
   }
 
   #[test]
+  fn tips_and_grain_shape_the_dab() {
+    let corner = |tip| {
+      let mut doc = Document::new(100, 100);
+      let mut stroke = doc.begin_stroke(Brush { tip, ..flat(40.0, 1.0) }, [0, 0, 0], false).unwrap();
+      stroke.add(&mut doc, 50.0, 50.0, 1.0);
+      alpha(&doc, 0, 67, 67)
+    };
+    assert_eq!(corner(Tip::Round), 0, "a disc misses the corner");
+    assert_eq!(corner(Tip::Square), 255, "a square fills it");
+
+    let mut doc = Document::new(300, 60);
+    let brush = Brush { grain: Grain::Paper, grain_depth: 1.0, ..flat(40.0, 1.0) };
+    line(&mut doc, brush, false, (20.0, 30.0), (280.0, 30.0));
+    let row: Vec<u8> = (30..270).map(|x| alpha(&doc, 0, x, 30)).collect();
+    assert!(row.iter().any(|&a| a < 128) && row.iter().any(|&a| a > 200), "paper grain leaves gaps");
+  }
+
+  #[test]
   fn locked_layers_refuse_strokes() {
     let mut doc = Document::new(10, 10);
     doc.layer_mut(0).unwrap().locked = true;
@@ -607,5 +701,14 @@ mod tests {
     }
     let elapsed = start.elapsed();
     eprintln!("{samples} samples of a 150 px smudge: {elapsed:?} ({:?} per sample)", elapsed / samples);
+    let brush = Brush { size: 300.0, tip: Tip::Chalk, grain: Grain::Paper, grain_depth: 0.6, follow: true, ..Brush::airbrush() };
+    let start = std::time::Instant::now();
+    let mut stroke = doc.begin_stroke(brush, [0, 0, 0], false).unwrap();
+    for i in 0..=samples {
+      let t = i as f32 / samples as f32;
+      stroke.add(&mut doc, 200.0 + 3600.0 * t, 1024.0 + 800.0 * (t * 12.0).sin(), 1.0);
+    }
+    let elapsed = start.elapsed();
+    eprintln!("{samples} samples of a 300 px chalk + paper grain: {elapsed:?} ({:?} per sample)", elapsed / samples);
   }
 }

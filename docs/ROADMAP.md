@@ -12,10 +12,11 @@
   file dialogs, unsaved-changes prompt, all v0.1 Photoshop shortcuts. Pen input through
   Windows Ink (pressure, eraser end, barrel button). Settings (language, theme, update checks)
   and the "New canvas" dialog. A native error dialog when no DX12/Vulkan GPU is found. **All
-  v0.1 features are in.** Phase 2 started: Smudge tool, end taper, pulled-string stabilizer.
+  v0.1 features are in.** Phase 2 started: Smudge tool, end taper, pulled-string stabilizer, brush tips and grains,
+  Brush Studio.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: brush shapes and grain textures with Brush Studio; the brush library by
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: the brush library by
   category; paint bucket and gradient; QuickShape; color disc, palettes and harmony; drawing
   guides; `.brushset`/`.abr` import.
 
@@ -70,7 +71,11 @@
 
 - [ ] Full brush library by category (Sketching, Inking, Drawing, Painting, Artistic,
       Calligraphy, Airbrushing, Textures, Abstract, Charcoals, Elements, Spraypaints…)
-- [ ] Brush Studio: edit every parameter, grain and shape textures, live preview, pen tilt
+- [x] Brush Studio: every parameter (shape, grain, dynamics, stroke), live preview painted by
+      the engine, reset
+- [x] Procedurally generated tips (round, square, chalk, bristles, splatter) and grains (paper,
+      canvas, noise), all original (ADR 0006); rotation, follow-the-stroke, scatter, size jitter
+- [ ] Pen tilt in the brush dynamics; save edited and new brushes
 - [x] Smudge tool (`S`): patch smudging with the brush's shape and opacity, pressure-aware
 - [ ] Wet mixing (paint brushes that pick up and blend canvas color)
 - [x] Stabilization: StreamLine plus a pulled-string stabilizer; strokes catch up with the

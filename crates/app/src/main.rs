@@ -69,6 +69,10 @@ pub(crate) struct App {
   /// Tab hides the interface.
   hidden: bool,
   confirm: Option<Pending>,
+  /// Brush Studio is open, on this section, with this preview.
+  studio: bool,
+  studio_section: ui::studio::Section,
+  preview: Option<ui::studio::Preview>,
   settings: Settings,
   /// The "New canvas" dialog and the size typed in it.
   new_canvas: Option<(u32, u32)>,
@@ -109,6 +113,9 @@ impl App {
       editing_slider: false,
       hidden: false,
       confirm: None,
+      studio: false,
+      studio_section: Default::default(),
+      preview: None,
       settings,
       new_canvas: None,
       error: None,
@@ -360,6 +367,7 @@ impl eframe::App for App {
     });
     if !self.hidden {
       self.popovers(&ctx);
+      self.brush_studio(&ctx);
     }
     self.dialogs(&ctx);
   }

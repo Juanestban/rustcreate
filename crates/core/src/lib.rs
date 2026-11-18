@@ -4,6 +4,7 @@ pub mod blend;
 mod brush;
 mod file;
 mod history;
+pub mod tip;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -12,6 +13,7 @@ pub use brush::{Brush, Stroke};
 pub use file::{FORMAT, FileError};
 pub use history::History;
 use history::Snapshot;
+pub use tip::{Grain, Tip};
 
 /// Tile side in pixels.
 pub const TILE: u32 = 256;

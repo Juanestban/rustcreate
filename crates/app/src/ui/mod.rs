@@ -2,4 +2,5 @@
 
 pub mod chrome;
 pub mod icons;
+pub mod studio;
 pub mod theme;
