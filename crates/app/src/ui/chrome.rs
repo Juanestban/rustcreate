@@ -14,11 +14,13 @@ use crate::library::{CATEGORIES, MINE, Name};
 use crate::settings::Theme;
 use crate::tools::Tool;
 use crate::{App, Pending};
+use rustcreate_core::GradientKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Popover {
   Actions,
   Brushes,
+  Fill,
   Layers,
   Color,
 }
@@ -55,8 +57,11 @@ impl App {
             ui.spacing_mut().item_spacing.x = 4.0;
             self.color_button(ui);
             self.popover_button(ui, Icon::Layers, Popover::Layers, "ui-layers");
-            // Right to left: eraser, smudge, brush. Clicking the active tool opens the brushes.
+            // Right to left: gradient, bucket, eraser, smudge, brush. Clicking the active tool
+            // opens its panel: brushes, or the bucket and gradient options.
             for (tool, icon, tooltip) in [
+              (Tool::Gradient, Icon::Gradient, "ui-tooltip-gradient"),
+              (Tool::Fill, Icon::Bucket, "ui-tooltip-bucket"),
               (Tool::Eraser, Icon::Eraser, "ui-tooltip-eraser"),
               (Tool::Smudge, Icon::Smudge, "ui-tooltip-smudge"),
               (Tool::Brush, Icon::Brush, "ui-tooltip-brush"),
@@ -64,7 +69,7 @@ impl App {
               let active = self.canvas.tools.tool == tool;
               if icons::button(ui, icon, active, true, &self.i18n.tr(tooltip)).clicked() {
                 if active {
-                  self.toggle(Popover::Brushes);
+                  self.toggle(if matches!(tool, Tool::Fill | Tool::Gradient) { Popover::Fill } else { Popover::Brushes });
                 }
                 self.canvas.tools.tool = tool;
               }
@@ -159,6 +164,7 @@ impl App {
         match popover {
           Popover::Actions => self.actions_panel(ui),
           Popover::Brushes => self.brushes_panel(ui),
+          Popover::Fill => self.fill_panel(ui),
           Popover::Layers => self.layers_panel(ui),
           Popover::Color => self.color_panel(ui),
         }
@@ -216,6 +222,25 @@ impl App {
     }
     ui.separator();
     ui.label(RichText::new(format!("rustcreate {}", env!("CARGO_PKG_VERSION"))).small().color(theme::palette(ui).muted));
+  }
+
+  /// Bucket and gradient options.
+  fn fill_panel(&mut self, ui: &mut egui::Ui) {
+    let tools = &mut self.canvas.tools;
+    let i18n = &self.i18n;
+    ui.label(RichText::new(i18n.tr("ui-tooltip-bucket")).strong());
+    ui.horizontal(|ui| {
+      ui.label(i18n.tr("ui-fill-threshold"));
+      ui.add(egui::Slider::new(&mut tools.fill_threshold, 0.0..=1.0).custom_formatter(|v, _| format!("{:.0} %", v * 100.0)));
+    });
+    ui.checkbox(&mut tools.fill_all_layers, i18n.tr("ui-fill-all-layers"));
+    ui.separator();
+    ui.label(RichText::new(i18n.tr("ui-tooltip-gradient")).strong());
+    ui.horizontal(|ui| {
+      ui.selectable_value(&mut tools.gradient, GradientKind::Linear, i18n.tr("ui-gradient-linear"));
+      ui.selectable_value(&mut tools.gradient, GradientKind::Radial, i18n.tr("ui-gradient-radial"));
+    });
+    ui.checkbox(&mut tools.gradient_to_clear, i18n.tr("ui-gradient-to-clear"));
   }
 
   /// The brush library: categories on the left, the category's brushes on the right with

@@ -13,10 +13,11 @@
   Windows Ink (pressure, eraser end, barrel button). Settings (language, theme, update checks)
   and the "New canvas" dialog. A native error dialog when no DX12/Vulkan GPU is found. **All
   v0.1 features are in.** Phase 2 started: Smudge tool, end taper, pulled-string stabilizer, brush tips and grains,
-  Brush Studio, the brush library with saved brushes and a brush per tool.
+  Brush Studio, the brush library with saved brushes and a brush per tool, the paint bucket and the
+  gradient.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: paint bucket and gradient; QuickShape; color disc, palettes and harmony; drawing
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: QuickShape; color disc, palettes and harmony; drawing
   guides; `.brushset`/`.abr` import.
 
 ## Phase 0 — Foundation
@@ -84,7 +85,10 @@
       pointer when they end; per-brush settings in the brushes panel
 - [ ] Motion filtering (remove jitter from shaky hands or noisy tablets)
 - [ ] QuickShape (hold to snap lines, ellipses, polygons)
-- [ ] Paint bucket (ColorDrop) with threshold, gradient tool
+- [x] Paint bucket with threshold, sampling the active layer or all visible layers, growing
+      under antialiased edges; gradient tool (linear/radial, to the secondary color or to clear,
+      dithered, live while dragging); Alt+Backspace fills the layer
+- [ ] Drag-and-drop color fill from the color button (Procreate's ColorDrop)
 - [ ] Color disc, eyedropper loupe, color palettes, harmony modes
 - [ ] Drawing guides: grid, perspective (1/2/3 point), symmetry
 - [ ] Import `.brushset` and `.abr` brushes the user owns

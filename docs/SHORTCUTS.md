@@ -15,7 +15,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Z` | Zoom tool | 🕓 |
 | `R` | Rotate view (`Esc` resets rotation) | ✅ |
 | `S` | Smudge | ✅ |
-| `G` | Paint bucket / gradient | 🕓 |
+| `G` | Paint bucket; again for the gradient | ✅ |
 | `M` | Marquee selection | 🕓 |
 | `L` | Lasso selection | 🕓 |
 | `W` | Magic wand / quick selection | 🕓 |
@@ -45,7 +45,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Ctrl+T` | Free transform | 🕓 |
 | `Ctrl+A` / `Ctrl+D` / `Ctrl+Shift+I` | Select all / deselect / invert selection | 🕓 |
 | `Backspace` / `Delete` | Clear layer (or selection) | ✅ |
-| `Alt+Backspace` | Fill with primary color | 🕓 |
+| `Alt+Backspace` | Fill with primary color | ✅ |
 
 ## Layers
 

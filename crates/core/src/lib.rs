@@ -3,6 +3,7 @@
 pub mod blend;
 mod brush;
 mod file;
+mod fill;
 mod history;
 pub mod tip;
 
@@ -11,6 +12,7 @@ use std::sync::Arc;
 
 pub use brush::{Brush, Stroke};
 pub use file::{FORMAT, FileError};
+pub use fill::{Gradient, GradientKind};
 pub use history::History;
 use history::Snapshot;
 pub use tip::{Grain, Tip};

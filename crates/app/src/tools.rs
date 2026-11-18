@@ -2,7 +2,7 @@
 //! (docs/SHORTCUTS.md).
 
 use eframe::egui::{InputState, Key, Modifiers};
-use rustcreate_core::{Brush, Document};
+use rustcreate_core::{Brush, Document, GradientKind};
 
 use crate::library::Library;
 
@@ -10,12 +10,26 @@ const MIN_SIZE: f32 = 1.0;
 const MAX_SIZE: f32 = 1000.0;
 const RECENT_COLORS: usize = 10;
 
-/// The three painting tools of the top bar.
+/// The painting tools of the top bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
   Brush,
   Smudge,
   Eraser,
+  /// Paint bucket.
+  Fill,
+  Gradient,
+}
+
+impl Tool {
+  /// Which library brush slot the tool uses; the bucket and the gradient show the paint brush.
+  fn slot(self) -> usize {
+    match self {
+      Tool::Smudge => 1,
+      Tool::Eraser => 2,
+      _ => 0,
+    }
+  }
 }
 
 pub struct Tools {
@@ -28,7 +42,14 @@ pub struct Tools {
   pub hand: bool,
   /// Straight sRGB.
   pub primary: [u8; 3],
-  secondary: [u8; 3],
+  pub secondary: [u8; 3],
+  /// Paint bucket: 0..=1 color difference it spreads over, and whether it sees every visible
+  /// layer (to color line art on another layer) or only the active one.
+  pub fill_threshold: f32,
+  pub fill_all_layers: bool,
+  pub gradient: GradientKind,
+  /// The gradient fades the primary color out instead of blending into the secondary.
+  pub gradient_to_clear: bool,
   /// Colors painted with, newest first.
   pub recent: Vec<[u8; 3]>,
 }
@@ -42,6 +63,10 @@ impl Default for Tools {
       hand: false,
       primary: [0, 0, 0],
       secondary: [255, 255, 255],
+      fill_threshold: 0.1,
+      fill_all_layers: true,
+      gradient: GradientKind::Linear,
+      gradient_to_clear: false,
       recent: Vec::new(),
     }
   }
@@ -55,16 +80,16 @@ impl Tools {
 
   /// The brush `tool` paints with.
   pub fn brush_for(&self, tool: Tool) -> Brush {
-    self.library.entries[self.library.selection[tool as usize]].brush
+    self.library.entries[self.library.selection[tool.slot()]].brush
   }
 
   /// The library index of the current tool's brush.
   pub fn selected(&self) -> usize {
-    self.library.selection[self.tool as usize]
+    self.library.selection[self.tool.slot()]
   }
 
   pub fn select(&mut self, index: usize) {
-    self.library.selection[self.tool as usize] = index;
+    self.library.selection[self.tool.slot()] = index;
   }
 
   pub fn brush_mut(&mut self) -> &mut Brush {
@@ -96,6 +121,11 @@ impl Tools {
     if input.consume_key(Modifiers::NONE, Key::E) {
       (self.tool, self.hand) = (Tool::Eraser, false);
     }
+    // G: paint bucket, again for the gradient (Photoshop keeps both under G).
+    if input.consume_key(Modifiers::NONE, Key::G) {
+      self.tool = if self.tool == Tool::Fill { Tool::Gradient } else { Tool::Fill };
+      self.hand = false;
+    }
     if input.consume_key(Modifiers::NONE, Key::I) {
       self.picking = !self.picking;
     }
@@ -103,6 +133,10 @@ impl Tools {
       self.hand = !self.hand;
     }
     if !painting {
+      // Before the plain Backspace (clear layer), which Alt+Backspace would match too.
+      if input.consume_key(Modifiers::ALT, Key::Backspace) {
+        doc.fill_layer(self.primary);
+      }
       layer_shortcuts(input, doc);
     }
     if input.consume_key(Modifiers::NONE, Key::OpenBracket) {
@@ -217,6 +251,19 @@ mod tests {
     assert_eq!(doc.layers().len(), 3);
     press(&mut tools, &mut doc, Modifiers::COMMAND, Key::E);
     assert_eq!(doc.layers().len(), 2);
+  }
+
+  #[test]
+  fn bucket_and_gradient_shortcuts() {
+    let (mut tools, mut doc) = (Tools::default(), Document::new(10, 10));
+    press(&mut tools, &mut doc, Modifiers::NONE, Key::G);
+    assert_eq!(tools.tool, Tool::Fill);
+    press(&mut tools, &mut doc, Modifiers::NONE, Key::G);
+    assert_eq!(tools.tool, Tool::Gradient);
+    assert_eq!(tools.current().0, tools.brush_for(Tool::Brush), "they show the paint brush");
+    tools.primary = [9, 8, 7];
+    press(&mut tools, &mut doc, Modifiers::ALT, Key::Backspace);
+    assert_eq!(doc.layers()[0].painted_tiles(), 1, "Alt+Backspace fills the layer, not clears it");
   }
 
   #[test]

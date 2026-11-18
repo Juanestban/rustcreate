@@ -3,7 +3,7 @@
 
 use eframe::egui::{self, Event, Key, Modifiers, Pos2, Rect, Vec2, vec2};
 use eframe::egui_wgpu::{self, wgpu};
-use rustcreate_core::{Document, Stroke};
+use rustcreate_core::{Document, Gradient, Stroke};
 use rustcreate_render::{CanvasRenderer, Placement};
 
 use crate::tools::{Tool, Tools};
@@ -80,6 +80,8 @@ pub struct Canvas {
   last_point: Option<(f32, f32)>,
   /// The pen's pressure while it touches (Windows Ink); `None` means mouse.
   pen: Option<f32>,
+  /// A gradient being dragged: from where it started (screen, canvas) to where it is now.
+  gradient: Option<(Gradient, Pos2, Pos2, Pos2)>,
 }
 
 impl Canvas {
@@ -87,7 +89,7 @@ impl Canvas {
   pub fn new(render_state: &egui_wgpu::RenderState, doc: &Document) -> Self {
     let renderer = CanvasRenderer::new(&render_state.device, render_state.target_format, (doc.width, doc.height));
     render_state.renderer.write().callback_resources.insert(renderer);
-    Self { view: None, tools: Tools::default(), stroke: None, last_point: None, pen: None }
+    Self { view: None, tools: Tools::default(), stroke: None, last_point: None, pen: None, gradient: None }
   }
 
   /// A new or opened document: a renderer of its size, the view fitted again. Tools stay.
@@ -104,7 +106,7 @@ impl Canvas {
     let view = self.view.get_or_insert_with(|| View::fit(rect.size(), canvas));
     handle_input(ui, &response, rect, canvas, view, self.tools.hand);
     let view = *view;
-    let painting = self.stroke.is_some();
+    let painting = self.stroke.is_some() || self.gradient.is_some();
     if keys {
       ui.input_mut(|input| self.tools.shortcuts(input, doc, painting));
     }
@@ -115,6 +117,63 @@ impl Canvas {
     }
     let placement = view.placement(rect, canvas, ui.ctx().pixels_per_point());
     ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, CanvasCallback { placement }));
+    // The gradient's guide line while dragging.
+    if let Some((_, start, _, end)) = &self.gradient {
+      let (line, shadow) = (egui::Stroke::new(2.0, egui::Color32::WHITE), egui::Color32::from_black_alpha(90));
+      ui.painter().line_segment([*start, *end], egui::Stroke::new(4.0, shadow));
+      ui.painter().line_segment([*start, *end], line);
+      for point in [*start, *end] {
+        ui.painter().circle(point, 5.0, shadow, line);
+      }
+    }
+  }
+
+  /// The bucket fills on press; the gradient follows the drag and stays when released.
+  fn fill_or_gradient(
+    &mut self,
+    ui: &egui::Ui,
+    response: &egui::Response,
+    to_canvas: &impl Fn(Pos2) -> Pos2,
+    doc: &mut Document,
+    pressed: bool,
+    released: bool,
+  ) {
+    let tools = &mut self.tools;
+    if pressed
+      && response.hovered()
+      && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+    {
+      let p = to_canvas(origin);
+      let on_canvas = p.x >= 0.0 && p.y >= 0.0 && p.x < doc.width as f32 && p.y < doc.height as f32;
+      match tools.tool {
+        Tool::Fill if on_canvas => {
+          if doc.fill(p.x as u32, p.y as u32, tools.primary, tools.fill_threshold, tools.fill_all_layers) {
+            tools.used_color();
+          }
+        }
+        Tool::Gradient => {
+          let [r, g, b] = tools.primary;
+          let [sr, sg, sb] = tools.secondary;
+          let end = if tools.gradient_to_clear { [r, g, b, 0] } else { [sr, sg, sb, 255] };
+          if let Some(gradient) = doc.begin_gradient(tools.gradient, [[r, g, b, 255], end]) {
+            tools.used_color();
+            self.gradient = Some((gradient, origin, p, origin));
+          }
+        }
+        _ => {}
+      }
+    }
+    if let Some((gradient, _, from, end)) = &mut self.gradient
+      && let Some(now) = ui.input(|i| i.pointer.interact_pos())
+      && now != *end
+    {
+      *end = now;
+      let to = to_canvas(now);
+      gradient.update(doc, (from.x, from.y), (to.x, to.y));
+    }
+    if released {
+      self.gradient = None;
+    }
   }
 
   /// Turns primary-button presses and drags into strokes. Space and R drags belong to the view.
@@ -147,6 +206,12 @@ impl Canvas {
       }
       if released {
         self.tools.picking = false;
+      }
+      return;
+    }
+    if matches!(self.tools.tool, Tool::Fill | Tool::Gradient) && !pen.eraser {
+      if !view_drag || self.gradient.is_some() {
+        self.fill_or_gradient(ui, response, &to_canvas, doc, pressed, released);
       }
       return;
     }

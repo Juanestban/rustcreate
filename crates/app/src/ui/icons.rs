@@ -17,6 +17,8 @@ pub enum Icon {
   Brush,
   Smudge,
   Eraser,
+  Bucket,
+  Gradient,
   Layers,
   Eyedropper,
   Undo,
@@ -96,6 +98,20 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
       line(body);
       seg((8.5, 10.5), (15.5, 17.5));
       seg((11.0, 21.0), (21.0, 21.0));
+    }
+    Icon::Bucket => {
+      // A tipped pail and the drop falling from its lip.
+      line(vec![at(9.0, 3.5), at(17.5, 12.0), at(11.0, 18.5), at(2.5, 10.0), at(9.0, 3.5)]);
+      seg((4.5, 8.0), (14.5, 9.0));
+      line(vec![at(17.5, 12.0), at(19.5, 15.5), at(19.5, 17.5)]);
+      line(arc(at(19.5, 19.0), 1.6 * s, 0.0, TAU));
+    }
+    Icon::Gradient => {
+      // A square with hatching that thins out from left to right.
+      rounded((3.5, 3.5), (20.5, 20.5), 3.0);
+      for (x, dy) in [(6.5, 0.0), (9.0, 0.0), (11.5, 3.0), (14.5, 6.0), (17.5, 9.0)] {
+        seg((x, 6.5 + dy), (x, 17.5 - dy));
+      }
     }
     Icon::Layers => {
       line(vec![at(12.0, 3.5), at(21.0, 8.0), at(12.0, 12.5), at(3.0, 8.0), at(12.0, 3.5)]);
