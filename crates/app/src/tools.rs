@@ -210,6 +210,19 @@ impl Tools {
 
 fn layer_shortcuts(input: &mut InputState, doc: &mut Document) {
   let active = doc.active();
+  // Ctrl+Alt+G: clipping mask (Photoshop); /: Alpha Lock ("lock transparent pixels").
+  let clip = active > 0 && input.consume_key(Modifiers::COMMAND | Modifiers::ALT, Key::G);
+  let lock = input.consume_key(Modifiers::NONE, Key::Slash);
+  if clip || lock {
+    doc.checkpoint();
+    let layer = doc.layer_mut(active).expect("active layer");
+    if clip {
+      layer.clip = !layer.clip;
+    }
+    if lock {
+      layer.alpha_lock = !layer.alpha_lock;
+    }
+  }
   let top = doc.layers().len() - 1;
   if input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::N) {
     doc.add_layer();

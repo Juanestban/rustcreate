@@ -82,6 +82,7 @@ impl Document {
     let (width, height) = (self.width, self.height);
     let selection = self.selection.clone();
     let layer = &mut self.layers[self.active];
+    let alpha_lock = layer.alpha_lock;
     // One pixel of margin for the grown edge.
     let (x0, y0, x1, y1) = (x0.saturating_sub(1), y0.saturating_sub(1), (x1 + 1).min(width - 1), (y1 + 1).min(height - 1));
     let inside = |x: u32, y: u32| mask.get(x, y);
@@ -100,7 +101,15 @@ impl Document {
             if w <= 0.0 {
               continue;
             }
-            if inside(px, py) {
+            if alpha_lock {
+              // Recolor what is painted, keep its alpha; nothing grows behind the edges.
+              if inside(px, py) || edge(px, py) {
+                let a = out[3] as f32 / 255.0;
+                for ch in 0..3 {
+                  out[ch] = (out[ch] as f32 * (1.0 - w) + color[ch] as f32 * a * w).round() as u8;
+                }
+              }
+            } else if inside(px, py) {
               let color = [color[0], color[1], color[2], 255];
               for ch in 0..4 {
                 out[ch] = (out[ch] as f32 * (1.0 - w) + color[ch] as f32 * w).round() as u8;
@@ -162,6 +171,7 @@ impl Gradient {
     let (tiles_x, tiles_y) = doc.tiles();
     let selection = doc.selection.clone();
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
+    let alpha_lock = layer.alpha_lock;
     let (dx, dy) = (to.0 - from.0, to.1 - from.1);
     let length2 = (dx * dx + dy * dy).max(1e-6);
     let [a, b] = self.colors.map(|c| c.map(|v| v as f32));
@@ -185,12 +195,16 @@ impl Gradient {
             let alpha = (a[3] + (b[3] - a[3]) * t) / 255.0 * Selection::weight(selection.as_ref(), px, py);
             let p = (((py % TILE) * TILE + px % TILE) * 4) as usize;
             let out = &mut pixels[p..p + 4];
-            // Normal blending over the layer, in premultiplied color.
+            // Normal blending over the layer, in premultiplied color; Alpha Lock keeps the alpha.
+            let keep = if alpha_lock { out[3] as f32 / 255.0 } else { 1.0 };
             for ch in 0..3 {
-              let src = (a[ch] + (b[ch] - a[ch]) * t) * alpha;
-              out[ch] = (src + out[ch] as f32 * (1.0 - alpha) + dither).round().clamp(0.0, 255.0) as u8;
+              let src = (a[ch] + (b[ch] - a[ch]) * t) * alpha * keep;
+              let most = if alpha_lock { out[3] as f32 } else { 255.0 };
+              out[ch] = (src + out[ch] as f32 * (1.0 - alpha) + dither).round().clamp(0.0, most) as u8;
             }
-            out[3] = (alpha * 255.0 + out[3] as f32 * (1.0 - alpha) + dither).round().clamp(0.0, 255.0) as u8;
+            if !alpha_lock {
+              out[3] = (alpha * 255.0 + out[3] as f32 * (1.0 - alpha) + dither).round().clamp(0.0, 255.0) as u8;
+            }
           }
         }
       }

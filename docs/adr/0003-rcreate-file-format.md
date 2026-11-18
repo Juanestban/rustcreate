@@ -6,7 +6,8 @@
 ## Context
 
 Documents need to store layers losslessly with their properties, open fast, be easy to inspect
-and grow later to animation frames, masks and adjustment layers.
+and grow later to animation frames, masks and adjustment layers. Optional per-layer fields
+(`alpha_lock`, `clip`) default to `false` when missing, so they did not bump FORMAT.
 
 ## Decision
 

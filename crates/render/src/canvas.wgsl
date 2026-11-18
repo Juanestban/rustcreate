@@ -17,11 +17,14 @@ fn fullscreen(@builtin(vertex_index) index: u32) -> FullscreenOut {
 struct LayerParams {
   opacity: f32,
   mode: u32,
+  // 1 = clipping mask: the layer only shows where `base` has paint.
+  clip: u32,
 }
 
 @group(0) @binding(0) var below: texture_2d<f32>;
 @group(0) @binding(1) var layer: texture_2d<f32>;
 @group(0) @binding(2) var<uniform> params: LayerParams;
+@group(0) @binding(3) var base: texture_2d<f32>;
 
 fn hard_light(cs: f32, cd: f32) -> f32 {
   if cs <= 0.5 {
@@ -58,7 +61,10 @@ fn blend(mode: u32, cs: f32, cd: f32) -> f32 {
 fn composite(in: FullscreenOut) -> @location(0) vec4<f32> {
   let p = vec2<i32>(in.position.xy);
   let d = textureLoad(below, p, 0);
-  let s = textureLoad(layer, p, 0) * params.opacity;
+  var s = textureLoad(layer, p, 0) * params.opacity;
+  if params.clip == 1u {
+    s *= textureLoad(base, p, 0).a;
+  }
   let sa = s.a;
   if sa == 0.0 {
     return d;

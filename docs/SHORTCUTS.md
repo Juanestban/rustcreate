@@ -57,10 +57,10 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Ctrl+J` | Duplicate layer | ✅ |
 | `Ctrl+E` | Merge down | ✅ |
 | `Ctrl+G` | Group layers | 🕓 |
-| `Ctrl+Alt+G` | Clipping mask | 🕓 |
+| `Ctrl+Alt+G` | Clipping mask | ✅ |
+| `/` | Alpha Lock (lock transparent pixels) | ✅ |
 | `Ctrl+[` / `Ctrl+]` | Move layer down / up | ✅ |
 | `Alt+[` / `Alt+]` | Select layer below / above | ✅ |
-| `/` | Lock layer transparency | 🕓 |
 
 ## View
 

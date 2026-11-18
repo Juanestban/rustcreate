@@ -63,6 +63,10 @@ pub struct Layer {
   pub hidden: bool,
   pub locked: bool,
   pub blend: BlendMode,
+  /// Alpha Lock: painting keeps the transparency there is (only painted pixels change color).
+  pub alpha_lock: bool,
+  /// Clipping mask: shows only where the base layer below (the first one not clipped) has paint.
+  pub clip: bool,
   /// Only tiles that were painted exist; a missing tile is fully transparent.
   tiles: HashMap<(u32, u32), Tile>,
   /// Tiles written through `tile_mut` since the renderer last looked (see `take_dirty`).
@@ -71,7 +75,18 @@ pub struct Layer {
 
 impl Layer {
   fn new(id: u64, name: String) -> Self {
-    Self { id, name, opacity: 1.0, hidden: false, locked: false, blend: BlendMode::Normal, tiles: HashMap::new(), dirty: HashSet::new() }
+    Self {
+      id,
+      name,
+      opacity: 1.0,
+      hidden: false,
+      locked: false,
+      blend: BlendMode::Normal,
+      alpha_lock: false,
+      clip: false,
+      tiles: HashMap::new(),
+      dirty: HashSet::new(),
+    }
   }
 
   pub fn tile(&self, tx: u32, ty: u32) -> Option<&[u8]> {
@@ -291,7 +306,14 @@ impl Document {
     let lower = &mut self.layers[index - 1];
     if !upper.hidden {
       for (&(tx, ty), tile) in &upper.tiles {
-        blend::composite(lower.tile_mut(tx, ty), tile, upper.opacity, upper.blend);
+        if upper.clip {
+          // A clipped layer merges only where its base has paint.
+          let Some(base) = lower.tile(tx, ty) else { continue };
+          let masked = blend::clip(tile, base);
+          blend::composite(lower.tile_mut(tx, ty), &masked, upper.opacity, upper.blend);
+        } else {
+          blend::composite(lower.tile_mut(tx, ty), tile, upper.opacity, upper.blend);
+        }
       }
     }
     if self.active >= index {
@@ -488,5 +510,35 @@ mod tests {
     doc.checkpoint();
     assert!(doc.history().bytes() <= TILE_BYTES);
     assert!(doc.history().steps() < 6);
+  }
+
+  #[test]
+  fn alpha_lock_keeps_transparency() {
+    let mut doc = Document::new(100, 100);
+    doc.layer_mut(0).unwrap().tile_mut(0, 0)[..4 * 50].copy_from_slice(&[0, 0, 255, 255].repeat(50));
+    doc.layer_mut(0).unwrap().alpha_lock = true;
+    let mut stroke = doc.begin_stroke(Brush { size: 10.0, ..Brush::ink() }, [255, 0, 0], false).unwrap();
+    stroke.line(&mut doc, (0.0, 0.0), (90.0, 0.0), 1.0);
+    stroke.finish(&mut doc);
+    let px = |doc: &Document, x: usize| doc.layers()[0].tile(0, 0).unwrap()[x * 4..x * 4 + 4].to_vec();
+    assert_eq!(px(&doc, 20)[3], 255);
+    assert!(px(&doc, 20)[0] > 200, "painted pixels take the color: {:?}", px(&doc, 20));
+    assert_eq!(px(&doc, 70), vec![0, 0, 0, 0], "transparent pixels stay transparent");
+    assert!(doc.fill(80, 50, [0, 255, 0], 0.1, false), "the bucket runs");
+    assert_eq!(px(&doc, 70)[3], 0, "and keeps transparency too");
+  }
+
+  #[test]
+  fn clipped_layers_show_only_over_their_base() {
+    let mut doc = Document::new(10, 1);
+    doc.layer_mut(0).unwrap().tile_mut(0, 0)[..4 * 5].copy_from_slice(&[0, 0, 255, 255].repeat(5));
+    doc.add_layer();
+    let top = doc.layer_mut(1).unwrap();
+    top.tile_mut(0, 0)[..4 * 10].copy_from_slice(&[255, 0, 0, 255].repeat(10));
+    top.clip = true;
+    let tile = doc.composite_tile(0, 0).unwrap();
+    assert_eq!((&tile[8..12], &tile[28..32]), (&[255u8, 0, 0, 255][..], &[0u8, 0, 0, 0][..]), "red only over the blue base");
+    doc.layer_mut(0).unwrap().hidden = true;
+    assert!(doc.composite_tile(0, 0).is_none_or(|t| t.iter().all(|&v| v == 0)), "a hidden base hides its clipped layers");
   }
 }

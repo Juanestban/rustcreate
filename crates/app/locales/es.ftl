@@ -242,3 +242,7 @@ ui-transform-rotate = Girar 90°
 ui-transform-reset = Restablecer
 ui-transform-cancel = Cancelar
 ui-transform-done = Aplicar
+ui-layer-alpha-lock = Bloqueo alfa
+ui-layer-alpha-lock-help = Pinta solo donde la capa ya tiene pintura y conserva su transparencia (/).
+ui-layer-clip = Máscara de recorte
+ui-layer-clip-help = Muestra esta capa solo donde la capa de abajo tiene pintura (Ctrl+Alt+G).

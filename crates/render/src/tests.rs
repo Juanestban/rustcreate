@@ -87,6 +87,17 @@ fn gpu_composite_matches_the_cpu_reference() {
     }
   }
 
+  // A clipping mask: the last layer only shows over the one below it.
+  doc.layer_mut(modes.len()).unwrap().clip = true;
+  renderer.sync(&device, &queue, &mut doc);
+  let gpu = read_back(&device, &queue, renderer.composite_texture(), (width, height));
+  let cpu = doc.composite_tile(0, 0).unwrap();
+  assert!(
+    gpu.iter().zip(cpu.chunks(TILE as usize * 4).flat_map(|row| &row[..width as usize * 4])).all(|(g, c)| g.abs_diff(*c) <= 2),
+    "clipping matches"
+  );
+  doc.layer_mut(modes.len()).unwrap().clip = false;
+
   // Hiding a layer re-composites; painting re-uploads only what changed.
   doc.layer_mut(1).unwrap().hidden = true;
   doc.layer_mut(2).unwrap().tile_mut(0, 0)[TILE as usize * 4..][..4].copy_from_slice(&[0, 0, 0, 0]);

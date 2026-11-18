@@ -242,3 +242,7 @@ ui-transform-rotate = Rotate 90°
 ui-transform-reset = Reset
 ui-transform-cancel = Cancel
 ui-transform-done = Done
+ui-layer-alpha-lock = Alpha Lock
+ui-layer-alpha-lock-help = Paint only where the layer already has paint, keeping its transparency (/).
+ui-layer-clip = Clipping mask
+ui-layer-clip-help = Show this layer only where the layer below has paint (Ctrl+Alt+G).

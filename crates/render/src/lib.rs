@@ -37,8 +37,8 @@ pub struct CanvasRenderer {
   /// Ping-pong targets; `result` indexes the finished composite.
   stack: [(wgpu::Texture, wgpu::TextureView); 2],
   result: usize,
-  /// What the last composite was made from: (id, opacity, hidden, blend) bottom to top.
-  composed: Vec<(u64, u32, bool, BlendMode)>,
+  /// What the last composite was made from: (id, opacity, hidden, blend, clip) bottom to top.
+  composed: Vec<(u64, u32, bool, BlendMode, bool)>,
   composite_pipeline: wgpu::RenderPipeline,
   composite_layout: wgpu::BindGroupLayout,
   display_pipeline: wgpu::RenderPipeline,
@@ -70,7 +70,7 @@ impl CanvasRenderer {
     };
     let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
       label: Some("composite"),
-      entries: &[texture_entry(0), texture_entry(1), uniform_entry(2, wgpu::ShaderStages::FRAGMENT)],
+      entries: &[texture_entry(0), texture_entry(1), uniform_entry(2, wgpu::ShaderStages::FRAGMENT), texture_entry(3)],
     });
     let display_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
       label: Some("display"),
@@ -150,7 +150,7 @@ impl CanvasRenderer {
     let live: Vec<u64> = doc.layers().iter().map(|l| l.id).collect();
     self.layers.retain(|id, _| live.contains(id));
 
-    let composed: Vec<_> = doc.layers().iter().map(|l| (l.id, l.opacity.to_bits(), l.hidden, l.blend)).collect();
+    let composed: Vec<_> = doc.layers().iter().map(|l| (l.id, l.opacity.to_bits(), l.hidden, l.blend, l.clip)).collect();
     if changed || composed != self.composed {
       self.composite(device, queue, doc.layers());
       self.composed = composed;
@@ -161,11 +161,19 @@ impl CanvasRenderer {
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("composite") });
     let mut target = 0;
     pass(&mut encoder, &self.stack[target].1, None);
-    for layer in layers.iter().filter(|l| !l.hidden) {
+    // The base of the current clipping group (like `Document::composite_tile`).
+    let mut base = None;
+    for (i, layer) in layers.iter().enumerate() {
+      let clipped = layer.clip && i > 0;
+      if !clipped {
+        base = (!layer.hidden).then_some(layer.id);
+      }
+      let Some(base_id) = base.filter(|_| !layer.hidden) else { continue };
       let gpu = &self.layers[&layer.id];
       let mut params = [0u8; 16];
       params[..4].copy_from_slice(&layer.opacity.clamp(0.0, 1.0).to_ne_bytes());
       params[4..8].copy_from_slice(&(layer.blend as u32).to_ne_bytes());
+      params[8..12].copy_from_slice(&u32::from(clipped).to_ne_bytes());
       queue.write_buffer(&gpu.params, 0, &params);
       let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
@@ -174,6 +182,7 @@ impl CanvasRenderer {
           wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.stack[target].1) },
           wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gpu.view) },
           wgpu::BindGroupEntry { binding: 2, resource: gpu.params.as_entire_binding() },
+          wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&self.layers[&base_id].view) },
         ],
       });
       target = 1 - target;

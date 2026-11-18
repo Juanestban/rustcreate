@@ -312,6 +312,8 @@ pub struct Stroke {
   mirrors: Vec<Mirror>,
   /// The selection when the stroke began: paint only lands inside it.
   selection: Option<Selection>,
+  /// The layer's Alpha Lock when the stroke began.
+  alpha_lock: bool,
 }
 
 impl Document {
@@ -322,7 +324,7 @@ impl Document {
     if layer.locked {
       return None;
     }
-    let layer_id = layer.id;
+    let (layer_id, alpha_lock) = (layer.id, layer.alpha_lock);
     self.checkpoint();
     Some(Stroke {
       brush,
@@ -347,6 +349,7 @@ impl Document {
       mirrors: Vec::new(),
       motion: MotionFilter::default(),
       selection: self.selection.clone(),
+      alpha_lock,
     })
   }
 
@@ -669,7 +672,15 @@ impl Stroke {
             let p = i * 4;
             let before = &tile.before[p..p + 4];
             let out = &mut pixels[p..p + 4];
-            if self.erase {
+            if self.alpha_lock {
+              // Keep the alpha; only painted pixels take the color (the eraser does nothing).
+              if !self.erase {
+                let keep = before[3] as f32 / 255.0;
+                for ch in 0..3 {
+                  out[ch] = (color[ch] * alpha * keep + before[ch] as f32 * (1.0 - alpha)).round() as u8;
+                }
+              }
+            } else if self.erase {
               for ch in 0..4 {
                 out[ch] = (before[ch] as f32 * (1.0 - alpha)).round() as u8;
               }
@@ -724,8 +735,17 @@ impl Stroke {
             }
             let source = patch[(py - y0) as usize * columns + (px - x0) as usize];
             let p = (((py % TILE) * TILE + px % TILE) * 4) as usize;
+            let alpha = pixels[p + 3];
             for (out, src) in pixels[p..p + 4].iter_mut().zip(source) {
               *out = (*out as f32 + (src as f32 - *out as f32) * weight).round() as u8;
+            }
+            if self.alpha_lock {
+              // Smudged color, the pixel's own alpha (premultiplied color never exceeds it).
+              let old = pixels[p + 3].max(1) as f32;
+              for ch in 0..3 {
+                pixels[p + ch] = (pixels[p + ch] as f32 * alpha as f32 / old).round().min(alpha as f32) as u8;
+              }
+              pixels[p + 3] = alpha;
             }
           }
         }

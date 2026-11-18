@@ -28,6 +28,12 @@ pub fn composite(dst: &mut [u8], src: &[u8], opacity: f32, mode: BlendMode) {
   }
 }
 
+/// A clipped layer's tile limited to where `base` has paint: every channel scaled by the base's
+/// alpha (both premultiplied).
+pub(crate) fn clip(tile: &[u8], base: &[u8]) -> Vec<u8> {
+  tile.as_chunks::<4>().0.iter().zip(base.as_chunks::<4>().0).flat_map(|(p, b)| p.map(|v| (v as u32 * b[3] as u32 / 255) as u8)).collect()
+}
+
 /// The blend function B(Cs, Cd) on straight colors in 0..=1.
 fn blend(mode: BlendMode, cs: f32, cd: f32) -> f32 {
   match mode {

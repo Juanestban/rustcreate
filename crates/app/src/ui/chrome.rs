@@ -515,7 +515,10 @@ impl App {
     egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
       for index in (0..self.doc.layers().len()).rev() {
         let layer = &self.doc.layers()[index];
-        let (id, name, hidden, locked) = (layer.id, layer.name.clone(), layer.hidden, layer.locked);
+        let (id, hidden, locked) = (layer.id, layer.hidden, layer.locked);
+        // A clipped layer is marked with an arrow into the layer below.
+        let name = layer.name.clone();
+        let shown = if layer.clip && index > 0 { format!("↳ {name}") } else { name.clone() };
         let active = index == self.doc.active();
         let row = Frame::NONE
           .fill(if active { palette.selected } else { palette.control })
@@ -537,7 +540,7 @@ impl App {
                 }
               } else {
                 let label =
-                  ui.add(egui::Label::new(RichText::new(&name).color(if hidden { palette.muted } else { palette.ink })).sense(Sense::click()));
+                  ui.add(egui::Label::new(RichText::new(&shown).color(if hidden { palette.muted } else { palette.ink })).sense(Sense::click()));
                 if label.double_clicked() {
                   self.renaming = Some((id, name.clone()));
                 } else if label.clicked() {
@@ -595,6 +598,16 @@ impl App {
     if blend != self.doc.layers()[index].blend {
       self.doc.checkpoint();
       self.doc.layer_mut(index).expect("layer").blend = blend;
+    }
+    let (mut alpha_lock, mut clip) = (self.doc.layers()[index].alpha_lock, self.doc.layers()[index].clip);
+    ui.horizontal(|ui| {
+      ui.checkbox(&mut alpha_lock, self.i18n.tr("ui-layer-alpha-lock")).on_hover_text(self.i18n.tr("ui-layer-alpha-lock-help"));
+      ui.add_enabled(index > 0, egui::Checkbox::new(&mut clip, self.i18n.tr("ui-layer-clip"))).on_hover_text(self.i18n.tr("ui-layer-clip-help"));
+    });
+    if (alpha_lock, clip) != (self.doc.layers()[index].alpha_lock, self.doc.layers()[index].clip) {
+      self.doc.checkpoint();
+      let layer = self.doc.layer_mut(index).expect("layer");
+      (layer.alpha_lock, layer.clip) = (alpha_lock, clip);
     }
     ui.horizontal(|ui| {
       if icons::button(ui, Icon::Duplicate, false, true, &self.i18n.tr("ui-layer-duplicate")).clicked() {

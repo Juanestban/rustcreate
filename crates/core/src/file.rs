@@ -58,6 +58,11 @@ struct Manifest {
 
 #[derive(Serialize, Deserialize)]
 struct LayerInfo {
+  /// Added after format 1 shipped: older files lack them.
+  #[serde(default)]
+  alpha_lock: bool,
+  #[serde(default)]
+  clip: bool,
   id: u64,
   name: String,
   opacity: f32,
@@ -92,7 +97,16 @@ impl Document {
       layers: self
         .layers
         .iter()
-        .map(|l| LayerInfo { id: l.id, name: l.name.clone(), opacity: l.opacity, hidden: l.hidden, locked: l.locked, blend: l.blend })
+        .map(|l| LayerInfo {
+          alpha_lock: l.alpha_lock,
+          clip: l.clip,
+          id: l.id,
+          name: l.name.clone(),
+          opacity: l.opacity,
+          hidden: l.hidden,
+          locked: l.locked,
+          blend: l.blend,
+        })
         .collect(),
       guide: self.guide.clone(),
     };
@@ -144,6 +158,7 @@ impl Document {
       layer.opacity = if info.opacity.is_finite() { info.opacity.clamp(0.0, 1.0) } else { 1.0 };
       layer.hidden = info.hidden;
       layer.locked = info.locked;
+      (layer.alpha_lock, layer.clip) = (info.alpha_lock, info.clip);
       layer.blend = info.blend;
       read_layer_png(&png, doc.width, doc.height, &mut layer)?;
       doc.layers.push(layer);
@@ -165,9 +180,25 @@ impl Document {
   /// layer painted it.
   pub fn composite_tile(&self, tx: u32, ty: u32) -> Option<Vec<u8>> {
     let mut out: Option<Vec<u8>> = None;
-    for layer in self.layers.iter().filter(|l| !l.hidden) {
-      if let Some(tile) = layer.tile(tx, ty) {
-        blend::composite(out.get_or_insert_with(|| vec![0; TILE_BYTES]), tile, layer.opacity, layer.blend);
+    // The base of a clipping group: its tile, and whether it shows at all.
+    let mut base: (Option<&[u8]>, bool) = (None, false);
+    for (i, layer) in self.layers.iter().enumerate() {
+      let clipped = layer.clip && i > 0;
+      if !clipped {
+        base = (layer.tile(tx, ty), !layer.hidden);
+      }
+      if layer.hidden || (clipped && !base.1) {
+        continue;
+      }
+      let Some(tile) = layer.tile(tx, ty) else { continue };
+      let out = out.get_or_insert_with(|| vec![0; TILE_BYTES]);
+      if clipped {
+        // Only where the base has paint: scale the clipped layer by the base's alpha.
+        let Some(under) = base.0 else { continue };
+        let masked = blend::clip(tile, under);
+        blend::composite(out, &masked, layer.opacity, layer.blend);
+      } else {
+        blend::composite(out, tile, layer.opacity, layer.blend);
       }
     }
     out
