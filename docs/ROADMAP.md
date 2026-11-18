@@ -14,10 +14,10 @@
   and the "New canvas" dialog. A native error dialog when no DX12/Vulkan GPU is found. **All
   v0.1 features are in.** Phase 2 started: Smudge tool, end taper, pulled-string stabilizer, brush tips and grains,
   Brush Studio, the brush library with saved brushes and a brush per tool, the paint bucket and the
-  gradient, QuickShape.
+  gradient, QuickShape, the color disc with harmonies and palettes.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: color disc, palettes and harmony; drawing
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: drawing
   guides; `.brushset`/`.abr` import.
 
 ## Phase 0 — Foundation
@@ -92,7 +92,10 @@
       under antialiased edges; gradient tool (linear/radial, to the secondary color or to clear,
       dithered, live while dragging); Alt+Backspace fills the layer
 - [ ] Drag-and-drop color fill from the color button (Procreate's ColorDrop)
-- [ ] Color disc, eyedropper loupe, color palettes, harmony modes
+- [x] Color panel: own hue ring with saturation/brightness square, classic picker, harmony
+      modes (complementary, split, analogous, triadic, tetradic), hex field, palettes saved to
+      `palettes.json` (new, rename, delete, add/remove colors)
+- [ ] Eyedropper loupe; palette import/export (.swatches, .aco, .ase)
 - [ ] Drawing guides: grid, perspective (1/2/3 point), symmetry
 - [ ] Import `.brushset` and `.abr` brushes the user owns
 

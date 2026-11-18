@@ -157,7 +157,7 @@ impl App {
       let palette = theme::palette(ui);
       Frame::popup(ui.style()).fill(palette.panel).corner_radius(theme::PANEL_RADIUS).inner_margin(Margin::same(12)).show(ui, |ui| {
         ui.set_width(match popover {
-          Popover::Color => 240.0,
+          Popover::Color => 260.0,
           Popover::Brushes => 380.0,
           _ => 280.0,
         });
@@ -172,7 +172,7 @@ impl App {
     });
   }
 
-  fn title(&self, ui: &mut egui::Ui, id: &str) {
+  pub(crate) fn title(&self, ui: &mut egui::Ui, id: &str) {
     ui.label(RichText::new(self.i18n.tr(id)).strong().size(15.0));
     ui.add_space(6.0);
   }
@@ -434,28 +434,5 @@ impl App {
         self.doc.delete_layer(index);
       }
     });
-  }
-
-  fn color_panel(&mut self, ui: &mut egui::Ui) {
-    self.title(ui, "ui-color");
-    let tools = &mut self.canvas.tools;
-    let [r, g, b] = tools.primary;
-    let mut color = Color32::from_rgb(r, g, b);
-    if egui::color_picker::color_picker_color32(ui, &mut color, egui::color_picker::Alpha::Opaque) {
-      tools.primary = [color.r(), color.g(), color.b()];
-    }
-    if !tools.recent.is_empty() {
-      ui.add_space(8.0);
-      ui.label(RichText::new(self.i18n.tr("ui-color-history")).color(theme::palette(ui).muted));
-      ui.horizontal_wrapped(|ui| {
-        for &[r, g, b] in &tools.recent.clone() {
-          let (rect, response) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::click());
-          ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(r, g, b));
-          if response.clicked() {
-            tools.primary = [r, g, b];
-          }
-        }
-      });
-    }
   }
 }

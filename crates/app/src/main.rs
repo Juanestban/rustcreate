@@ -3,6 +3,7 @@
 mod canvas;
 mod i18n;
 mod library;
+mod palettes;
 mod pen;
 mod settings;
 mod tools;
@@ -72,6 +73,14 @@ pub(crate) struct App {
   confirm: Option<Pending>,
   /// Brush Studio is open, on this section, with this preview.
   studio: bool,
+  color_tab: ui::color::Tab,
+  harmony: ui::color::Harmony,
+  /// The panel's color as HSV, so the hue survives gray (RGB loses it).
+  color_hsv: Option<egui::ecolor::Hsva>,
+  color_hex: String,
+  palettes: palettes::Palettes,
+  /// The palette shown in the color panel.
+  palette: usize,
   /// The category the brushes panel shows; `None` follows the current brush.
   brush_category: Option<usize>,
   /// Brush previews in the library, by brush id, with the brush and theme they show.
@@ -121,6 +130,12 @@ impl App {
       hidden: false,
       confirm: None,
       studio: false,
+      color_tab: Default::default(),
+      harmony: Default::default(),
+      color_hsv: None,
+      color_hex: String::new(),
+      palettes: palettes::Palettes::load(&I18n::new(settings.language()).tr("ui-palette-starter")),
+      palette: 0,
       brush_category: None,
       thumbnails: Default::default(),
       studio_section: Default::default(),
@@ -383,6 +398,7 @@ impl eframe::App for App {
     // Not mid-drag, so a size slider being dragged saves once at the end.
     if !ctx.input(|i| i.pointer.any_down()) {
       self.canvas.tools.library.save_if_changed();
+      self.palettes.save_if_changed();
     }
   }
 }
