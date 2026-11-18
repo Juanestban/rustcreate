@@ -1,12 +1,14 @@
 //! The document model: a canvas of tiled RGBA8 raster layers with undo (ADR 0005). No GPU here.
 
 pub mod blend;
+mod brush;
 mod file;
 mod history;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+pub use brush::{Brush, Stroke};
 pub use file::{FORMAT, FileError};
 pub use history::History;
 use history::Snapshot;

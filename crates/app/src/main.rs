@@ -2,6 +2,7 @@
 
 mod canvas;
 mod i18n;
+mod tools;
 mod update;
 mod updates;
 
@@ -43,7 +44,7 @@ impl eframe::App for App {
     self.update_banner(ui);
     let render_state = frame.wgpu_render_state().expect("eframe runs on wgpu (ADR 0001)");
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(ui.visuals().extreme_bg_color)).show(ui, |ui| {
-      self.canvas.show(ui, render_state, &mut self.doc);
+      self.canvas.show(ui, render_state, &mut self.doc, &self.i18n);
     });
   }
 }

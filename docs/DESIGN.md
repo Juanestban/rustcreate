@@ -27,8 +27,8 @@ file; do not silently diverge.
 
 | Crate | Responsibility | Must not know about |
 |---|---|---|
-| `rustcreate-core` (`crates/core`) | Document model: tiles, layers, blend modes, history, `.rcreate` read/write | GPU, egui |
-| `rustcreate-render` (`crates/render`) | wgpu brush engine, compositor, blend-mode shaders, tile uploads | egui |
+| `rustcreate-core` (`crates/core`) | Document model: tiles, layers, blend modes, history, brush engine (CPU dabs), `.rcreate` read/write | GPU, egui |
+| `rustcreate-render` (`crates/render`) | wgpu compositor, blend-mode shaders, tile uploads, canvas view | egui |
 | `rustcreate` (`crates/app`) | egui interface, themes, icons, shortcuts, pen input, i18n, updater | — |
 
 ## Canvas and history

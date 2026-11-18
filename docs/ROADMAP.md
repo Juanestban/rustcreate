@@ -6,11 +6,12 @@
   CI and release packaging copied from archi-games. App skeleton: eframe window with the icon,
   system dark/light theme, Fluent `en`/`es`, updater (startup + every 5 h, banner, verified
   install). `core`: tiled layers, layer stack operations, blend modes, undo/redo history, `.rcreate`
-  save/open and PNG export. `render`: wgpu compositor and canvas view with zoom, pan and rotation.
+  save/open and PNG export. `render`: wgpu compositor and canvas view with zoom, pan and rotation. Painting with the
+  mouse: brush engine, Pencil/Ink/Airbrush/Eraser, Photoshop tool and undo shortcuts.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** the brush engine (dab stamping with pressure, spacing, taper, streamline) and the
-  four v0.1 brushes.
+- **Next:** the Procreate-like interface (top bar, size/opacity sliders, brush picker, layers
+  panel, color picker), then pen input through Windows Ink.
 
 ## Phase 0 — Foundation
 
@@ -34,8 +35,9 @@
 ### Render (`crates/render`)
 - [x] wgpu canvas sharing eframe's device (paint callback)
 - [x] Zoom, pan, rotate view (pinch/Ctrl+wheel, scroll, Space/middle drag, hold R, Ctrl+0/1/+/-, Esc)
-- [ ] Brush engine: dab stamping with spacing, size/opacity from pressure, taper, streamline
-- [ ] Brushes: Pencil, Ink, Airbrush, Eraser
+- [x] Brush engine (CPU, in `core`): dab stamping with spacing, size/flow from pressure, start taper,
+      streamline, per-stroke opacity cap, airbrush build-up
+- [x] Brushes: Pencil, Ink, Airbrush, Eraser (erases with the selected brush)
 - [x] Layer compositor with blend-mode shaders (GPU test checks every mode against `core::blend`)
 - [x] Dirty-tile uploads
 
@@ -53,6 +55,8 @@
 - [ ] Clear error when no DX12/Vulkan GPU is available
 
 ## Phase 2 — Painting depth
+
+- [ ] End taper (needs the stroke length when it ends)
 
 - [ ] Full brush library by category (Sketching, Inking, Drawing, Painting, Artistic,
       Calligraphy, Airbrushing, Textures, Abstract, Charcoals, Elements, Spraypaints…)

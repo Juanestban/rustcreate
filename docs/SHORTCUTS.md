@@ -9,6 +9,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 |---|---|---|
 | `B` | Brush | ✅ |
 | `E` | Eraser | ✅ |
+| `Shift+B` | Next brush (Pencil → Ink → Airbrush) | ✅ |
 | `I` | Eyedropper (also `Alt` held while painting) | ✅ |
 | `H` / hold `Space` | Hand (pan) | ✅ |
 | `Z` | Zoom tool | 🕓 |

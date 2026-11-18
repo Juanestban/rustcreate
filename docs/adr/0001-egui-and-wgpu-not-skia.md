@@ -23,13 +23,17 @@ Options considered:
 
 - The interface (toolbars, panels, sliders, dialogs) is **egui** through **eframe with the wgpu
   backend**, the same stack as archi-games and ArtCraft's native launcher.
-- The canvas, brush engine and layer compositor are our own **wgpu** code in `crates/render`,
-  sharing the device eframe creates and drawn into the egui frame with a paint callback.
+- The layer compositor and canvas view are our own **wgpu** code in `crates/render`, sharing the
+  device eframe creates and drawn into the egui frame with a paint callback.
+- **Brush dabs are stamped on the CPU**, into the document's tiles in `crates/core` (decided
+  2026-11-18). The document stays the single source of truth, so undo and saving need no GPU
+  readback; the GPU only uploads changed tiles and composites, as Krita does. If a benchmark shows
+  large brushes or wet mixing falling behind, stamping can move to multithreading or the GPU later.
 - No Skia, no web view.
 
 ## Consequences
 
-- We write the brush and blend shaders ourselves (WGSL). More work up front, but nothing stands
-  between the pen and the GPU.
+- We write the blend shaders ourselves (WGSL); `core::blend` is the CPU reference they must match
+  (a GPU test checks it).
 - One GPU device for UI and canvas: no copies between contexts.
 - Porting to other platforms is mostly windowing and input; rendering stays the same.
