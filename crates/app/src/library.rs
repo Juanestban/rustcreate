@@ -12,7 +12,16 @@ use serde::{Deserialize, Serialize};
 use crate::settings::config_file;
 
 /// Category name tokens, in library order. The last one holds the user's brushes.
-pub const CATEGORIES: [&str; 6] = ["ui-cat-sketching", "ui-cat-inking", "ui-cat-painting", "ui-cat-airbrushing", "ui-cat-textures", "ui-cat-mine"];
+pub const CATEGORIES: [&str; 8] = [
+  "ui-cat-sketching",
+  "ui-cat-inking",
+  "ui-cat-painting",
+  "ui-cat-airbrushing",
+  "ui-cat-textures",
+  "ui-cat-calligraphy",
+  "ui-cat-abstract",
+  "ui-cat-mine",
+];
 pub const MINE: usize = CATEGORIES.len() - 1;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,7 +73,7 @@ struct Custom {
 fn builtins() -> Vec<Entry> {
   let base = Brush::ink();
   let flat = Brush { taper_start: 0.0, taper_end: 0.0, streamline: 0.1, ..base };
-  let list: [(&str, usize, Brush); 20] = [
+  let list: [(&str, usize, Brush); 28] = [
     ("graphite", 0, Brush { tilt_size: 0.7, tilt_flow: 0.5, ..Brush::pencil() }),
     ("soft-graphite", 0, Brush { tilt_size: 1.0, tilt_flow: 0.6, size: 10.0, hardness: 0.3, flow: 0.5, grain_depth: 0.75, ..Brush::pencil() }),
     ("technical-pencil", 0, Brush { size: 3.0, hardness: 1.0, flow: 0.9, pressure_size: 0.2, grain: Grain::None, ..Brush::pencil() }),
@@ -176,6 +185,52 @@ fn builtins() -> Vec<Entry> {
       Brush { size: 45.0, hardness: 0.4, flow: 0.6, pressure_flow: 0.8, grain: Grain::Paper, grain_depth: 0.85, grain_scale: 1.5, ..flat },
     ),
     ("canvas-texture", 4, Brush { size: 150.0, hardness: 0.0, flow: 0.5, grain: Grain::Canvas, grain_depth: 1.0, ..Brush::airbrush() }),
+    // Calligraphy: flat nibs at a fixed angle, so the width follows the direction.
+    (
+      "chisel-nib",
+      5,
+      Brush { size: 24.0, roundness: 0.18, angle: 45.0, hardness: 0.95, spacing: 0.03, pressure_size: 0.35, streamline: 0.4, ..flat },
+    ),
+    (
+      "script-pen",
+      5,
+      Brush {
+        size: 14.0,
+        roundness: 0.35,
+        angle: 30.0,
+        spacing: 0.03,
+        pressure_size: 0.8,
+        taper_start: 20.0,
+        taper_end: 30.0,
+        streamline: 0.5,
+        ..base
+      },
+    ),
+    ("monoline", 5, Brush { size: 10.0, pressure_size: 0.0, streamline: 0.7, ..flat }),
+    (
+      "brush-lettering",
+      5,
+      Brush {
+        size: 30.0,
+        roundness: 0.7,
+        angle: 30.0,
+        spacing: 0.03,
+        pressure_size: 1.0,
+        taper_start: 40.0,
+        taper_end: 60.0,
+        streamline: 0.6,
+        ..base
+      },
+    ),
+    // Abstract: scattered and ribbon-like marks.
+    ("confetti", 6, Brush { size: 18.0, hardness: 1.0, scatter: 2.0, size_jitter: 0.8, spacing: 1.5, pressure_size: 0.0, streamline: 0.0, ..flat }),
+    ("ribbon", 6, Brush { size: 50.0, roundness: 0.1, follow: true, angle: 60.0, spacing: 0.02, pressure_size: 0.3, ..flat }),
+    ("stipple", 6, Brush { size: 6.0, hardness: 0.9, scatter: 2.0, size_jitter: 0.6, spacing: 0.9, flow: 0.9, pressure_size: 0.5, ..flat }),
+    (
+      "splatter",
+      6,
+      Brush { size: 60.0, tip: Tip::Splatter, scatter: 1.0, size_jitter: 0.7, angle_jitter: 1.0, spacing: 0.6, pressure_size: 0.4, ..flat },
+    ),
   ];
   list.into_iter().map(|(id, category, brush)| Entry { id: id.to_owned(), name: Name::Token(token(id)), category, brush }).collect()
 }
@@ -203,6 +258,14 @@ fn token(id: &str) -> &'static str {
     "charcoal" => "ui-brush-charcoal",
     "pastel" => "ui-brush-pastel",
     "canvas-texture" => "ui-brush-canvas-texture",
+    "chisel-nib" => "ui-brush-chisel-nib",
+    "script-pen" => "ui-brush-script-pen",
+    "monoline" => "ui-brush-monoline",
+    "brush-lettering" => "ui-brush-brush-lettering",
+    "confetti" => "ui-brush-confetti",
+    "ribbon" => "ui-brush-ribbon",
+    "stipple" => "ui-brush-stipple",
+    "splatter" => "ui-brush-splatter",
     _ => "ui-brush-ink",
   }
 }
@@ -313,7 +376,12 @@ impl Library {
     self.entries.len() - 1
   }
 
-  /// Imports a `.brushset`, `.brush` or `.abr` into My brushes and keeps its images, so the
+  /// The brushes of one category, named as the user sees them, for exporting a set.
+  pub fn category(&self, category: usize, name: impl Fn(&Entry) -> String) -> Vec<(String, Brush)> {
+    self.entries.iter().filter(|e| e.category == category).map(|e| (name(e), e.brush)).collect()
+  }
+
+  /// Imports a `.rcbrushes`, `.brushset`, `.brush` or `.abr` into My brushes and keeps its images, so the
   /// brushes still work after a restart. Returns the first new brush.
   pub fn import(&mut self, path: &Path) -> Result<usize, FileError> {
     let bytes = std::fs::read(path)?;

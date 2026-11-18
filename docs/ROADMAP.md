@@ -20,8 +20,8 @@
   mixing, pen tilt.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Then: the rest of Phase 2 (more brush
-  categories, brush set export) or
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Then: the rest of Phase 2 (Elements brushes,
+  reading the rest of imported brush settings) or
   Phase 3.
 
 ## Phase 0 — Foundation
@@ -77,7 +77,10 @@
       Airbrushing and Textures, plus My brushes (duplicate, rename, delete); previews painted by
       the engine; each tool (paint, smudge, erase) keeps its own brush
 - [x] Edited and new brushes saved to `brushes.json` (only the differences from the built-ins)
-- [ ] More categories and brushes (Calligraphy, Abstract, Elements…), import/export of brush sets
+- [x] Calligraphy and Abstract categories (8 new brushes); tip roundness for flat nibs and
+      ribbons; rustcreate brush sets (`.rcbrushes`: every setting plus the images) exported per
+      category and imported back, with values brought into range
+- [ ] Elements category (clouds, water, fire): needs its own original textures
 - [x] Brush Studio: every parameter (shape, grain, dynamics, stroke), live preview painted by
       the engine, reset
 - [x] Procedurally generated tips (round, square, chalk, bristles, splatter) and grains (paper,
@@ -121,7 +124,7 @@
       and Photoshop `.abr` v6+ (sampled tips, raw or PackBits) into My brushes; imported images
       kept in `brush-images/` next to the settings
 - [ ] Read the rest of an imported brush's settings (Procreate `Brush.archive`, ABR
-      descriptors: spacing, dynamics…); export brush sets
+      descriptors: spacing, dynamics…)
 
 ## Phase 3 — Photoshop-grade editing
 

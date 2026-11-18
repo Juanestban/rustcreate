@@ -2,6 +2,9 @@
 //! `Grain.png` per brush) and Photoshop `.abr` v6+ (sampled tips). Only the shape and grain
 //! images come across; the rest of each brush starts from sensible defaults.
 //!
+//! rustcreate's own `.rcbrushes` sets keep every setting: a zip with `brushes.json` and the
+//! imported tips and grains its brushes use, under `images/`.
+//!
 //! Like `Document::open`, everything is checked: a damaged or hostile file is an error, never a
 //! panic or an oversized allocation.
 
@@ -68,9 +71,113 @@ fn names(set: &str, count: usize) -> impl Iterator<Item = String> + '_ {
   (1..=count).map(move |i| if count == 1 { set.to_owned() } else { format!("{set} {i}") })
 }
 
-/// A Procreate `.brushset` (one folder per brush) or `.brush` (files at the root).
+/// `brushes.json` in a `.rcbrushes` set.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct BrushSet {
+  format: u32,
+  brushes: Vec<NamedBrush>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct NamedBrush {
+  name: String,
+  brush: Brush,
+}
+
+/// Most brushes taken from one `.rcbrushes` set.
+const MAX_BRUSHES: usize = 1000;
+
+/// A `.rcbrushes` set with every setting of `brushes` and the imported images they use.
+pub fn export_brushes(brushes: &[(String, Brush)]) -> Result<Vec<u8>, FileError> {
+  use std::io::Write;
+  let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+  let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+  let set = BrushSet { format: 1, brushes: brushes.iter().map(|(name, brush)| NamedBrush { name: name.clone(), brush: *brush }).collect() };
+  zip.start_file("brushes.json", stored)?;
+  zip.write_all(&serde_json::to_vec_pretty(&set)?)?;
+  let mut images: Vec<(bool, u32)> = brushes
+    .iter()
+    .flat_map(|(_, b)| {
+      let tip = if let Tip::Image(id) = b.tip { Some((false, id)) } else { None };
+      let grain = if let Grain::Image(id) = b.grain { Some((true, id)) } else { None };
+      tip.into_iter().chain(grain)
+    })
+    .collect();
+  images.sort_unstable();
+  images.dedup();
+  for (grain, id) in images {
+    // Not registered (its file went missing): the brush paints round or without grain anyway.
+    let Some(values) = tip::image(id, grain) else { continue };
+    let side = if grain { GRAIN_SIZE } else { MASK_SIZE } as u32;
+    let bytes: Vec<u8> = values.iter().map(|v| (v * 255.0).round() as u8).collect();
+    zip.start_file(format!("images/{}-{id:08x}.png", if grain { "grain" } else { "tip" }), stored)?;
+    let mut encoder = png::Encoder::new(&mut zip, side, side);
+    encoder.set_color(png::ColorType::Grayscale);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header()?.write_image_data(&bytes)?;
+  }
+  Ok(zip.finish()?.into_inner())
+}
+
+/// A `.rcbrushes` set: its brushes as saved (brought into range) and its images.
+fn import_own(zip: &mut zip::ZipArchive<Cursor<&[u8]>>) -> Result<Imported, FileError> {
+  let read = |zip: &mut zip::ZipArchive<Cursor<&[u8]>>, i: usize| -> Result<(String, Vec<u8>), FileError> {
+    let entry = zip.by_index(i)?;
+    let name = entry.name()?.into_owned();
+    if entry.size() > MAX_ENTRY {
+      return Err(invalid(format!("{name} is too big")));
+    }
+    let mut data = Vec::with_capacity(entry.size() as usize);
+    entry.take(MAX_ENTRY).read_to_end(&mut data)?;
+    Ok((name, data))
+  };
+  let mut out = Imported::default();
+  let mut set = None;
+  for i in 0..zip.len() {
+    let (name, data) = read(zip, i)?;
+    if name == "brushes.json" {
+      set = Some(serde_json::from_slice::<BrushSet>(&data)?);
+    } else if let Some(file) = name.strip_prefix("images/") {
+      let grain = file.starts_with("grain-");
+      // The id is the image's hash, so the brushes' `Image(id)` find it again.
+      out.add(&data, grain)?;
+    }
+  }
+  let set = set.ok_or_else(|| invalid("no brushes.json"))?;
+  if set.format > 1 {
+    return Err(FileError::NewerFormat(set.format));
+  }
+  let known = |grain: bool, id: u32| out.images.iter().any(|i| i.grain == grain && i.id == id) || tip::image(id, grain).is_some();
+  let mut brushes = Vec::new();
+  for NamedBrush { name, brush } in set.brushes.into_iter().take(MAX_BRUSHES) {
+    let mut brush = brush.sanitized();
+    // An image the set does not carry would paint nothing; fall back to the plain shapes.
+    if let Tip::Image(id) = brush.tip
+      && !known(false, id)
+    {
+      brush.tip = Tip::Round;
+    }
+    if let Grain::Image(id) = brush.grain
+      && !known(true, id)
+    {
+      brush.grain = Grain::None;
+    }
+    brushes.push((name.chars().take(100).collect(), brush));
+  }
+  if brushes.is_empty() {
+    return Err(invalid("no brushes in this file"));
+  }
+  out.brushes = brushes;
+  Ok(out)
+}
+
+/// A Procreate `.brushset` (one folder per brush) or `.brush` (files at the root), or one of
+/// rustcreate's `.rcbrushes` sets.
 pub fn import_brushset(bytes: &[u8], set: &str) -> Result<Imported, FileError> {
   let mut zip = zip::ZipArchive::new(Cursor::new(bytes))?;
+  if zip.index_for_name("brushes.json").is_some() {
+    return import_own(&mut zip);
+  }
   // Folder → (shape, grain).
   let mut brushes: BTreeMap<String, ShapeAndGrain> = BTreeMap::new();
   for i in 0..zip.len() {
@@ -322,6 +429,26 @@ mod tests {
     let data: Vec<u8> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| f(x, y)).collect();
     encoder.write_header().unwrap().write_image_data(&data).unwrap();
     out
+  }
+
+  #[test]
+  fn own_sets_keep_every_setting_and_their_images() {
+    let id = load_brush_image(&disc(64, 64), false).unwrap();
+    let brush = Brush { tip: Tip::Image(id), roundness: 0.3, wet_mix: 0.4, size: 55.0, ..Brush::ink() };
+    let bytes = export_brushes(&[("Nib".into(), brush), ("Plain".into(), Brush::pencil())]).unwrap();
+    let back = import_brushset(&bytes, "ignored").unwrap();
+    assert_eq!(back.brushes, vec![("Nib".into(), brush), ("Plain".into(), Brush::pencil())]);
+    assert_eq!(back.images.len(), 1, "the tip travels with the set");
+    assert_eq!(back.images[0].id, id, "and keeps its id");
+
+    // Settings from a file are brought into range; a missing image falls back to round.
+    let json = br#"{"format":1,"brushes":[{"name":"Huge","brush":{"size":1e30,"spacing":0,"tip":{"image":7}}}]}"#;
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    zip.start_file("brushes.json", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(json).unwrap();
+    let back = import_brushset(&zip.finish().unwrap().into_inner(), "x").unwrap();
+    let huge = back.brushes[0].1;
+    assert_eq!((huge.size, huge.spacing, huge.tip), (1000.0, 0.01, Tip::Round));
   }
 
   /// A white disc on black, `w`×`h`.

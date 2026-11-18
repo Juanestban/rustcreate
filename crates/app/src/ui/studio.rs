@@ -123,6 +123,7 @@ impl App {
               ui.add(egui::Slider::new(&mut brush.size, 1.0..=1000.0).logarithmic(true).suffix(" px").fixed_decimals(0));
             });
             row(ui, "ui-studio-hardness", &mut |ui| percent(ui, &mut brush.hardness, 1.0));
+            row(ui, "ui-studio-roundness", &mut |ui| percent(ui, &mut brush.roundness, 1.0));
             row(ui, "ui-studio-spacing", &mut |ui| percent(ui, &mut brush.spacing, 2.0));
             row(ui, "ui-studio-angle", &mut |ui| {
               ui.add(egui::Slider::new(&mut brush.angle, -180.0..=180.0).suffix("°").fixed_decimals(0));

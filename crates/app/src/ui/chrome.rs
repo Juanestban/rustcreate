@@ -376,7 +376,8 @@ impl App {
         self.popover = None;
       }
       if ui.button(self.i18n.tr("ui-brush-import")).on_hover_text(self.i18n.tr("ui-brush-import-help")).clicked()
-        && let Some(path) = rfd::FileDialog::new().add_filter(self.i18n.tr("ui-brush-import-filter"), &["brushset", "brush", "abr"]).pick_file()
+        && let Some(path) =
+          rfd::FileDialog::new().add_filter(self.i18n.tr("ui-brush-import-filter"), &["rcbrushes", "brushset", "brush", "abr"]).pick_file()
       {
         match self.canvas.tools.library.import(&path) {
           Ok(first) => {
@@ -386,7 +387,30 @@ impl App {
           Err(error) => self.error = Some(self.i18n.tr_args("ui-brush-import-failed", &[("error", error.to_string().into())])),
         }
       }
+      if ui.button(self.i18n.tr("ui-brush-export")).on_hover_text(self.i18n.tr("ui-brush-export-help")).clicked() {
+        self.export_brushes(category);
+      }
     });
+  }
+
+  /// Saves the brushes of `category` as a `.rcbrushes` set, every setting included.
+  fn export_brushes(&mut self, category: usize) {
+    let library = &self.canvas.tools.library;
+    let brushes = library.category(category, |e| match &e.name {
+      Name::Token(id) => self.i18n.tr(id),
+      Name::Custom(name) => name.clone(),
+    });
+    if brushes.is_empty() {
+      return;
+    }
+    let file = format!("{}.rcbrushes", self.i18n.tr(CATEGORIES[category]));
+    let Some(path) = rfd::FileDialog::new().add_filter(self.i18n.tr("ui-brush-import-filter"), &["rcbrushes"]).set_file_name(file).save_file() else {
+      return;
+    };
+    let path = path.with_extension("rcbrushes");
+    if let Err(error) = rustcreate_core::export_brushes(&brushes).and_then(|bytes| Ok(std::fs::write(&path, bytes)?)) {
+      self.error = Some(self.i18n.tr_args("ui-brush-export-failed", &[("error", error.to_string().into())]));
+    }
   }
 
   /// A brush's display name: its translated token, or what the user called it.

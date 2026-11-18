@@ -122,7 +122,7 @@ pub(crate) const GRAIN_SIZE: usize = 256;
 /// point at one, and they are few and small.
 static IMAGES: RwLock<Vec<(u32, bool, &'static [f32])>> = RwLock::new(Vec::new());
 
-fn image(id: u32, grain: bool) -> Option<&'static [f32]> {
+pub(crate) fn image(id: u32, grain: bool) -> Option<&'static [f32]> {
   IMAGES.read().expect("image registry").iter().find(|(i, g, _)| *i == id && *g == grain).map(|(_, _, v)| *v)
 }
 

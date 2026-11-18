@@ -56,6 +56,9 @@ pub struct Brush {
   /// the paint, for shading with the side of a pencil. 0..=1 each.
   pub tilt_size: f32,
   pub tilt_flow: f32,
+  /// Tip roundness 0.05..=1: below 1 the tip is squashed across its angle, a flat nib for
+  /// calligraphy or a ribbon.
+  pub roundness: f32,
   /// The dab's shape.
   pub tip: Tip,
   /// Tip rotation in degrees.
@@ -74,6 +77,41 @@ pub struct Brush {
   pub grain_scale: f32,
   /// 0..=1, how much the grain holds paint back.
   pub grain_depth: f32,
+}
+
+impl Brush {
+  /// Every setting brought into the range Brush Studio offers, and a non-number back to the
+  /// default: brushes from a file must not paint gigantic or endless dabs.
+  pub fn sanitized(self) -> Self {
+    let d = Brush::ink();
+    let fit = |v: f32, lo: f32, hi: f32, default: f32| if v.is_finite() { v.clamp(lo, hi) } else { default };
+    Brush {
+      size: fit(self.size, 1.0, 1000.0, d.size),
+      opacity: fit(self.opacity, 0.0, 1.0, d.opacity),
+      hardness: fit(self.hardness, 0.0, 1.0, d.hardness),
+      spacing: fit(self.spacing, 0.01, 2.0, d.spacing),
+      flow: fit(self.flow, 0.0, 1.0, d.flow),
+      pressure_size: fit(self.pressure_size, 0.0, 1.0, 0.0),
+      pressure_flow: fit(self.pressure_flow, 0.0, 1.0, 0.0),
+      taper_start: fit(self.taper_start, 0.0, 1000.0, 0.0),
+      taper_end: fit(self.taper_end, 0.0, 1000.0, 0.0),
+      streamline: fit(self.streamline, 0.0, 1.0, 0.0),
+      string: fit(self.string, 0.0, 200.0, 0.0),
+      motion_filter: fit(self.motion_filter, 0.0, 1.0, 0.0),
+      wet_mix: fit(self.wet_mix, 0.0, 1.0, 0.0),
+      charge: fit(self.charge, 0.0, 1.0, 1.0),
+      tilt_size: fit(self.tilt_size, 0.0, 1.0, 0.0),
+      tilt_flow: fit(self.tilt_flow, 0.0, 1.0, 0.0),
+      roundness: fit(self.roundness, 0.05, 1.0, 1.0),
+      angle: fit(self.angle, -180.0, 180.0, 0.0),
+      angle_jitter: fit(self.angle_jitter, 0.0, 1.0, 0.0),
+      scatter: fit(self.scatter, 0.0, 2.0, 0.0),
+      size_jitter: fit(self.size_jitter, 0.0, 1.0, 0.0),
+      grain_scale: fit(self.grain_scale, 0.25, 8.0, 1.0),
+      grain_depth: fit(self.grain_depth, 0.0, 1.0, 0.0),
+      ..self
+    }
+  }
 }
 
 impl Default for Brush {
@@ -101,6 +139,7 @@ impl Brush {
       charge: 1.0,
       tilt_size: 0.0,
       tilt_flow: 0.0,
+      roundness: 1.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -132,6 +171,7 @@ impl Brush {
       charge: 1.0,
       tilt_size: 0.0,
       tilt_flow: 0.0,
+      roundness: 1.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -163,6 +203,7 @@ impl Brush {
       charge: 1.0,
       tilt_size: 0.0,
       tilt_flow: 0.0,
+      roundness: 1.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -562,7 +603,7 @@ impl Stroke {
   fn shape(brush: &Brush, (mask, texture): Textures, d: &Dab, radius: f32, px: u32, py: u32) -> f32 {
     let (dx, dy) = (px as f32 + 0.5 - d.x, py as f32 + 0.5 - d.y);
     let (sin, cos) = d.angle.sin_cos();
-    let (x, y) = ((dx * cos + dy * sin) / radius, (dy * cos - dx * sin) / radius);
+    let (x, y) = ((dx * cos + dy * sin) / radius, (dy * cos - dx * sin) / (radius * brush.roundness.clamp(0.05, 1.0)));
     let shape = brush.tip.covers(mask, x, y, brush.hardness, radius);
     let Some(texture) = texture.filter(|_| shape > 0.0) else { return shape };
     let grain = Grain::at(texture, px as f32, py as f32, brush.grain_scale);
@@ -725,6 +766,7 @@ mod tests {
       charge: 1.0,
       tilt_size: 0.0,
       tilt_flow: 0.0,
+      roundness: 1.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
