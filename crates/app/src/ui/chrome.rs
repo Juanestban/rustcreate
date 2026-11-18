@@ -10,7 +10,7 @@ use super::icons::{self, Icon};
 use super::theme;
 use crate::i18n::Language;
 use crate::settings::Theme;
-use crate::tools::BRUSHES;
+use crate::tools::{BRUSHES, Tool};
 use crate::{App, Pending};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,20 +53,19 @@ impl App {
             ui.spacing_mut().item_spacing.x = 4.0;
             self.color_button(ui);
             self.popover_button(ui, Icon::Layers, Popover::Layers, "ui-layers");
-            let tools = &mut self.canvas.tools;
-            if icons::button(ui, Icon::Eraser, tools.erasing, true, &self.i18n.tr("ui-tooltip-eraser")).clicked() {
-              if tools.erasing {
-                self.toggle(Popover::Brushes);
+            // Right to left: eraser, smudge, brush. Clicking the active tool opens the brushes.
+            for (tool, icon, tooltip) in [
+              (Tool::Eraser, Icon::Eraser, "ui-tooltip-eraser"),
+              (Tool::Smudge, Icon::Smudge, "ui-tooltip-smudge"),
+              (Tool::Brush, Icon::Brush, "ui-tooltip-brush"),
+            ] {
+              let active = self.canvas.tools.tool == tool;
+              if icons::button(ui, icon, active, true, &self.i18n.tr(tooltip)).clicked() {
+                if active {
+                  self.toggle(Popover::Brushes);
+                }
+                self.canvas.tools.tool = tool;
               }
-              self.canvas.tools.erasing = true;
-            }
-            icons::button(ui, Icon::Smudge, false, false, &format!("{} · {soon}", self.i18n.tr("ui-smudge")));
-            let erasing = self.canvas.tools.erasing;
-            if icons::button(ui, Icon::Brush, !erasing || self.popover == Some(Popover::Brushes), true, &self.i18n.tr("ui-tooltip-brush")).clicked() {
-              if !erasing {
-                self.toggle(Popover::Brushes);
-              }
-              self.canvas.tools.erasing = false;
             }
           });
         });

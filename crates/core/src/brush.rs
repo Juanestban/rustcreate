@@ -2,6 +2,10 @@
 //! pointer path at a fixed spacing. Dabs accumulate into a per-stroke coverage mask, and every
 //! touched pixel is recomposited from its pre-stroke value: overlapping dabs never exceed the
 //! stroke's opacity (like Procreate and Photoshop), unless the brush builds up (airbrush).
+//!
+//! Smudge strokes work differently: each dab drags the paint that was under the previous dab
+//! into its own place (patch smudging, as in Krita), with the brush's shape and opacity as
+//! strength. They never add color, so smudging an empty layer leaves it empty.
 
 use std::collections::HashMap;
 
@@ -90,6 +94,7 @@ pub struct Stroke {
   /// Straight (not premultiplied) sRGB.
   color: [u8; 3],
   erase: bool,
+  smudge: bool,
   layer_id: u64,
   tiles: HashMap<(u32, u32), StrokeTile>,
   /// Last smoothed point: x, y, pressure.
@@ -98,6 +103,8 @@ pub struct Stroke {
   travelled: f32,
   /// Distance left over from the previous segment until the next dab.
   carry: f32,
+  /// Smudge: where the previous dab was, the paint is picked up from.
+  smudged: Option<(f32, f32)>,
 }
 
 impl Document {
@@ -110,7 +117,14 @@ impl Document {
     }
     let layer_id = layer.id;
     self.checkpoint();
-    Some(Stroke { brush, color, erase, layer_id, tiles: HashMap::new(), last: None, travelled: 0.0, carry: 0.0 })
+    Some(Stroke { brush, color, erase, smudge: false, layer_id, tiles: HashMap::new(), last: None, travelled: 0.0, carry: 0.0, smudged: None })
+  }
+
+  /// Starts a smudge stroke on the active layer, as one undo step. `None` if it is locked.
+  pub fn begin_smudge(&mut self, brush: Brush) -> Option<Stroke> {
+    let mut stroke = self.begin_stroke(brush, [0; 3], false)?;
+    stroke.smudge = true;
+    Some(stroke)
   }
 }
 
@@ -169,6 +183,9 @@ impl Stroke {
 
   /// Stamps one dab centered at (x, y).
   fn dab(&mut self, doc: &mut Document, x: f32, y: f32, pressure: f32) {
+    if self.smudge {
+      return self.smudge_dab(doc, x, y, pressure);
+    }
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
     let radius = self.diameter(pressure) / 2.0;
     let flow = self.brush.flow * (1.0 - self.brush.pressure_flow * (1.0 - pressure));
@@ -187,13 +204,7 @@ impl Stroke {
         let tile = self.tiles.entry((tx, ty)).or_insert_with(|| StrokeTile { before: pixels.to_vec(), coverage: vec![0.0; (TILE * TILE) as usize] });
         for py in y0.max(ty * TILE)..=y1.min(ty * TILE + TILE - 1) {
           for px in x0.max(tx * TILE)..=x1.min(tx * TILE + TILE - 1) {
-            let distance = (px as f32 + 0.5 - x).hypot(py as f32 + 0.5 - y);
-            let falloff = if distance <= inner {
-              1.0
-            } else {
-              let t = ((distance - inner) / (radius - inner).max(1e-3)).clamp(0.0, 1.0);
-              1.0 - t * t * (3.0 - 2.0 * t)
-            };
+            let falloff = falloff((px as f32 + 0.5 - x).hypot(py as f32 + 0.5 - y), inner, radius);
             if falloff <= 0.0 {
               continue;
             }
@@ -219,6 +230,68 @@ impl Stroke {
         }
       }
     }
+  }
+
+  /// Moves the paint under the previous dab to (x, y), blended by the brush's shape × strength.
+  fn smudge_dab(&mut self, doc: &mut Document, x: f32, y: f32, pressure: f32) {
+    let Some((from_x, from_y)) = self.smudged.replace((x, y)) else { return };
+    let (width, height) = (doc.width, doc.height);
+    let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
+    let radius = self.diameter(pressure) / 2.0;
+    let strength = self.brush.opacity.clamp(0.0, 1.0) * (1.0 - self.brush.pressure_flow * (1.0 - pressure));
+    let inner = (radius * self.brush.hardness.clamp(0.0, 1.0)).min(radius - 1.0).max(0.0);
+    let (x0, y0) = ((x - radius).floor().max(0.0) as u32, (y - radius).floor().max(0.0) as u32);
+    let (x1, y1) = ((x + radius).ceil().min(width as f32 - 1.0), (y + radius).ceil().min(height as f32 - 1.0));
+    if x1 < x0 as f32 || y1 < y0 as f32 {
+      return;
+    }
+    let (x1, y1) = (x1 as u32, y1 as u32);
+    // Copy the source patch first: it can overlap the pixels about to change.
+    let (dx, dy) = ((from_x - x).round() as i64, (from_y - y).round() as i64);
+    let read = |layer: &crate::Layer, px: u32, py: u32| -> [u8; 4] {
+      let sx = (px as i64 + dx).clamp(0, width as i64 - 1) as u32;
+      let sy = (py as i64 + dy).clamp(0, height as i64 - 1) as u32;
+      layer.tile(sx / TILE, sy / TILE).map_or([0; 4], |t| {
+        let p = (((sy % TILE) * TILE + sx % TILE) * 4) as usize;
+        t[p..p + 4].try_into().expect("4 bytes")
+      })
+    };
+    let columns = (x1 - x0 + 1) as usize;
+    let patch: Vec<[u8; 4]> = (y0..=y1).flat_map(|py| (x0..=x1).map(move |px| (px, py))).map(|(px, py)| read(layer, px, py)).collect();
+    for ty in y0 / TILE..=y1 / TILE {
+      for tx in x0 / TILE..=x1 / TILE {
+        let (rows, cols) = (y0.max(ty * TILE)..=y1.min(ty * TILE + TILE - 1), x0.max(tx * TILE)..=x1.min(tx * TILE + TILE - 1));
+        // An empty tile only changes if paint is dragged into it.
+        let receives = rows.clone().any(|py| cols.clone().any(|px| patch[(py - y0) as usize * columns + (px - x0) as usize][3] > 0));
+        if layer.tile(tx, ty).is_none() && !receives {
+          continue;
+        }
+        let pixels = layer.tile_mut(tx, ty);
+        for py in rows.clone() {
+          for px in cols.clone() {
+            let weight = falloff((px as f32 + 0.5 - x).hypot(py as f32 + 0.5 - y), inner, radius) * strength;
+            if weight <= 0.0 {
+              continue;
+            }
+            let source = patch[(py - y0) as usize * columns + (px - x0) as usize];
+            let p = (((py % TILE) * TILE + px % TILE) * 4) as usize;
+            for (out, src) in pixels[p..p + 4].iter_mut().zip(source) {
+              *out = (*out as f32 + (src as f32 - *out as f32) * weight).round() as u8;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/// A dab's smoothstep edge: 1 inside `inner`, 0 at `radius`.
+fn falloff(distance: f32, inner: f32, radius: f32) -> f32 {
+  if distance <= inner {
+    1.0
+  } else {
+    let t = ((distance - inner) / (radius - inner).max(1e-3)).clamp(0.0, 1.0);
+    1.0 - t * t * (3.0 - 2.0 * t)
   }
 }
 
@@ -326,6 +399,34 @@ mod tests {
   }
 
   #[test]
+  fn smudge_drags_paint_and_never_adds_any() {
+    let mut doc = Document::new(256, 64);
+    // Left half solid red, right half empty.
+    let tile = doc.layer_mut(0).unwrap().tile_mut(0, 0);
+    for y in 0..64 {
+      for x in 0..128 {
+        let p = (y * TILE as usize + x) * 4;
+        tile[p..p + 4].copy_from_slice(&[255, 0, 0, 255]);
+      }
+    }
+    let mut stroke = doc.begin_smudge(Brush { opacity: 0.8, ..flat(24.0, 1.0) }).unwrap();
+    for x in (100..180).step_by(2) {
+      stroke.add(&mut doc, x as f32, 32.0, 1.0);
+    }
+    let smeared = alpha(&doc, 0, 150, 32);
+    assert!(smeared > 40, "red pulled into the empty half, got {smeared}");
+    assert_eq!(alpha(&doc, 0, 150, 5), 0, "outside the brush nothing moves");
+    assert!(doc.undo());
+    assert_eq!(alpha(&doc, 0, 150, 32), 0);
+
+    let mut empty = Document::new(64, 64);
+    let mut stroke = empty.begin_smudge(flat(20.0, 1.0)).unwrap();
+    stroke.add(&mut empty, 10.0, 10.0, 1.0);
+    stroke.add(&mut empty, 50.0, 50.0, 1.0);
+    assert_eq!(empty.layers()[0].painted_tiles(), 0, "smudging nothing creates no paint");
+  }
+
+  #[test]
   fn locked_layers_refuse_strokes() {
     let mut doc = Document::new(10, 10);
     doc.layer_mut(0).unwrap().locked = true;
@@ -358,5 +459,14 @@ mod tests {
     }
     let elapsed = start.elapsed();
     eprintln!("{samples} samples of a 300 px airbrush over 3600 px: {elapsed:?} ({:?} per sample)", elapsed / samples);
+    // Smudge back over the painted band: the slowest tool, it reads and writes every pixel.
+    let start = std::time::Instant::now();
+    let mut stroke = doc.begin_smudge(Brush { size: 150.0, ..Brush::ink() }).unwrap();
+    for i in 0..=samples {
+      let t = i as f32 / samples as f32;
+      stroke.add(&mut doc, 3800.0 - 3600.0 * t, 2048.0 + 800.0 * (t * 12.0).sin(), 1.0);
+    }
+    let elapsed = start.elapsed();
+    eprintln!("{samples} samples of a 150 px smudge: {elapsed:?} ({:?} per sample)", elapsed / samples);
   }
 }

@@ -6,7 +6,7 @@ use eframe::egui_wgpu::{self, wgpu};
 use rustcreate_core::{Document, Stroke};
 use rustcreate_render::{CanvasRenderer, Placement};
 
-use crate::tools::Tools;
+use crate::tools::{Tool, Tools};
 
 const MIN_ZOOM: f32 = 0.01;
 const MAX_ZOOM: f32 = 64.0;
@@ -156,13 +156,17 @@ impl Canvas {
       && response.hovered()
       && let Some(origin) = origin
     {
-      let (brush, color, erase) = self.tools.current();
+      let (brush, color, tool) = self.tools.current();
       // Flipping the pen to its eraser end erases with the same brush.
-      let erase = erase || pen.eraser;
+      let tool = if pen.eraser { Tool::Eraser } else { tool };
       let pressure = moves.first().map_or(self.pen.unwrap_or(1.0), |&(_, pressure)| pressure);
+      let stroke = match tool {
+        Tool::Smudge => doc.begin_smudge(brush),
+        _ => doc.begin_stroke(brush, color, tool == Tool::Eraser),
+      };
       // A locked layer refuses the stroke.
-      if let Some(mut stroke) = doc.begin_stroke(brush, color, erase) {
-        if !erase {
+      if let Some(mut stroke) = stroke {
+        if tool == Tool::Brush {
           self.tools.used_color();
         }
         let p = to_canvas(origin);

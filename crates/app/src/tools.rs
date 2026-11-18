@@ -11,11 +11,21 @@ const MIN_SIZE: f32 = 1.0;
 const MAX_SIZE: f32 = 1000.0;
 const RECENT_COLORS: usize = 10;
 
+/// The three painting tools of the top bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tool {
+  Brush,
+  Smudge,
+  Eraser,
+}
+
 pub struct Tools {
   /// Each brush keeps its own size and opacity, like Procreate.
   pub brushes: [Brush; 3],
   pub selected: usize,
-  pub erasing: bool,
+  /// shortcut: the three tools share the selected brush; Procreate gives each its own, split it
+  /// when the brush library grows (Phase 2).
+  pub tool: Tool,
   /// The eyedropper (I): the next press picks a color, then the brush comes back.
   pub picking: bool,
   /// The hand (H): primary drags pan instead of painting.
@@ -32,7 +42,7 @@ impl Default for Tools {
     Self {
       brushes: BRUSHES.map(|(_, brush)| brush),
       selected: 1,
-      erasing: false,
+      tool: Tool::Brush,
       picking: false,
       hand: false,
       primary: [0, 0, 0],
@@ -44,8 +54,8 @@ impl Default for Tools {
 
 impl Tools {
   /// The brush, color and mode a new stroke uses.
-  pub fn current(&self) -> (Brush, [u8; 3], bool) {
-    (self.brushes[self.selected], self.primary, self.erasing)
+  pub fn current(&self) -> (Brush, [u8; 3], Tool) {
+    (self.brushes[self.selected], self.primary, self.tool)
   }
 
   pub fn brush_mut(&mut self) -> &mut Brush {
@@ -65,13 +75,16 @@ impl Tools {
   pub fn shortcuts(&mut self, input: &mut InputState, doc: &mut Document, painting: bool) {
     if input.consume_key(Modifiers::SHIFT, Key::B) {
       self.selected = (self.selected + 1) % self.brushes.len();
-      (self.erasing, self.hand) = (false, false);
+      (self.tool, self.hand) = (Tool::Brush, false);
     }
     if input.consume_key(Modifiers::NONE, Key::B) {
-      (self.erasing, self.hand) = (false, false);
+      (self.tool, self.hand) = (Tool::Brush, false);
+    }
+    if input.consume_key(Modifiers::NONE, Key::S) {
+      (self.tool, self.hand) = (Tool::Smudge, false);
     }
     if input.consume_key(Modifiers::NONE, Key::E) {
-      (self.erasing, self.hand) = (true, false);
+      (self.tool, self.hand) = (Tool::Eraser, false);
     }
     if input.consume_key(Modifiers::NONE, Key::I) {
       self.picking = !self.picking;
@@ -162,9 +175,11 @@ mod tests {
   fn photoshop_tool_shortcuts() {
     let (mut tools, mut doc) = (Tools::default(), Document::new(10, 10));
     press(&mut tools, &mut doc, Modifiers::NONE, Key::E);
-    assert!(tools.current().2, "E = eraser");
+    assert_eq!(tools.current().2, Tool::Eraser, "E = eraser");
+    press(&mut tools, &mut doc, Modifiers::NONE, Key::S);
+    assert_eq!(tools.current().2, Tool::Smudge, "S = smudge");
     press(&mut tools, &mut doc, Modifiers::NONE, Key::B);
-    assert!(!tools.current().2, "B = brush");
+    assert_eq!(tools.current().2, Tool::Brush, "B = brush");
     press(&mut tools, &mut doc, Modifiers::NONE, Key::Num5);
     assert_eq!(tools.current().0.opacity, 0.5);
     press(&mut tools, &mut doc, Modifiers::NONE, Key::CloseBracket);

@@ -12,11 +12,13 @@
   file dialogs, unsaved-changes prompt, all v0.1 Photoshop shortcuts. Pen input through
   Windows Ink (pressure, eraser end, barrel button). Settings (language, theme, update checks)
   and the "New canvas" dialog. A native error dialog when no DX12/Vulkan GPU is found. **All
-  v0.1 features are in.**
+  v0.1 features are in.** Phase 2 started: Smudge tool.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** test on a Windows machine with a pen (build, MSI, portable EXE, pressure, eraser
-  end), fix what shows up, then tag `v0.1.0` (see `RELEASING.md`). After that, Phase 2.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: end taper and
+  stabilization modes; brush shapes and grain textures with Brush Studio; the brush library by
+  category; paint bucket and gradient; QuickShape; color disc, palettes and harmony; drawing
+  guides; `.brushset`/`.abr` import.
 
 ## Phase 0 — Foundation
 
@@ -70,7 +72,8 @@
 - [ ] Full brush library by category (Sketching, Inking, Drawing, Painting, Artistic,
       Calligraphy, Airbrushing, Textures, Abstract, Charcoals, Elements, Spraypaints…)
 - [ ] Brush Studio: edit every parameter, grain and shape textures, live preview, pen tilt
-- [ ] Smudge tool and wet mixing
+- [x] Smudge tool (`S`): patch smudging with the brush's shape and opacity, pressure-aware
+- [ ] Wet mixing (paint brushes that pick up and blend canvas color)
 - [ ] Stabilization modes (StreamLine, motion filtering)
 - [ ] QuickShape (hold to snap lines, ellipses, polygons)
 - [ ] Paint bucket (ColorDrop) with threshold, gradient tool

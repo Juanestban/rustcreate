@@ -14,7 +14,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `H` (toggle) / hold `Space` | Hand (pan) | ✅ |
 | `Z` | Zoom tool | 🕓 |
 | `R` | Rotate view (`Esc` resets rotation) | ✅ |
-| `S` | Smudge | 🕓 |
+| `S` | Smudge | ✅ |
 | `G` | Paint bucket / gradient | 🕓 |
 | `M` | Marquee selection | 🕓 |
 | `L` | Lasso selection | 🕓 |
