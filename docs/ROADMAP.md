@@ -14,11 +14,12 @@
   and the "New canvas" dialog. A native error dialog when no DX12/Vulkan GPU is found. **All
   v0.1 features are in.** Phase 2 started: Smudge tool, end taper, pulled-string stabilizer, brush tips and grains,
   Brush Studio, the brush library with saved brushes and a brush per tool, the paint bucket and the
-  gradient, QuickShape, the color disc with harmonies and palettes, drawing guides with symmetry.
+  gradient, QuickShape, the color disc with harmonies and palettes, drawing guides with symmetry,
+  brush import from `.brushset` and `.abr`, ColorDrop and the eyedropper loupe.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: `.brushset`/`.abr`
-  import.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: motion filtering; perspective guides; QuickShape editing; wet mixing; pen
+  tilt.
 
 ## Phase 0 — Foundation
 
@@ -91,16 +92,23 @@
 - [x] Paint bucket with threshold, sampling the active layer or all visible layers, growing
       under antialiased edges; gradient tool (linear/radial, to the secondary color or to clear,
       dithered, live while dragging); Alt+Backspace fills the layer
-- [ ] Drag-and-drop color fill from the color button (Procreate's ColorDrop)
+- [x] ColorDrop: drag the color button onto the canvas to fill there (bucket threshold and
+      sampling)
+- [ ] ColorDrop threshold adjusted by dragging after the drop
 - [x] Color panel: own hue ring with saturation/brightness square, classic picker, harmony
       modes (complementary, split, analogous, triadic, tetradic), hex field, palettes saved to
       `palettes.json` (new, rename, delete, add/remove colors)
-- [ ] Eyedropper loupe; palette import/export (.swatches, .aco, .ase)
+- [x] Eyedropper loupe: a ring by the pointer, the picked color over the previous one
+- [ ] Palette import/export (.swatches, .aco, .ase)
 - [x] Drawing guides: 2D grid and isometric with Drawing Assist (strokes keep to the grid's
       directions); symmetry (vertical, horizontal, quadrant, radial 2–16) painted by the engine
       in the same stroke, one undo step
 - [ ] Perspective guides (1/2/3 point); movable guide center; guide saved in the file
-- [ ] Import `.brushset` and `.abr` brushes the user owns
+- [x] Import brushes the user owns: Procreate `.brushset`/`.brush` (shape and grain images)
+      and Photoshop `.abr` v6+ (sampled tips, raw or PackBits) into My brushes; imported images
+      kept in `brush-images/` next to the settings
+- [ ] Read the rest of an imported brush's settings (Procreate `Brush.archive`, ABR
+      descriptors: spacing, dynamics…); export brush sets
 
 ## Phase 3 — Photoshop-grade editing
 

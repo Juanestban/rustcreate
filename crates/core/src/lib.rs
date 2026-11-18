@@ -6,6 +6,7 @@ mod file;
 mod fill;
 mod guide;
 mod history;
+mod import;
 mod shape;
 pub mod tip;
 
@@ -18,6 +19,7 @@ pub use fill::{Gradient, GradientKind};
 pub use guide::Symmetry;
 pub use history::History;
 use history::Snapshot;
+pub use import::{BrushImage, Imported, import_abr, import_brushset, load_brush_image};
 pub use shape::Shape;
 pub use tip::{Grain, Tip};
 

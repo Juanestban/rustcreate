@@ -4,7 +4,9 @@
 
 use std::collections::HashMap;
 
-use rustcreate_core::{Brush, Grain, Tip};
+use std::path::Path;
+
+use rustcreate_core::{Brush, FileError, Grain, Tip};
 use serde::{Deserialize, Serialize};
 
 use crate::settings::config_file;
@@ -177,6 +179,25 @@ fn token(id: &str) -> &'static str {
   }
 }
 
+/// The folder, next to the settings, that keeps imported tips and grains.
+const IMAGES: &str = "brush-images";
+
+fn image_file(grain: bool, id: u32) -> String {
+  format!("{}-{id:08x}.png", if grain { "grain" } else { "tip" })
+}
+
+/// Registers the tips and grains kept from earlier imports. A damaged one is skipped: its
+/// brushes paint round and without grain.
+fn register_images() {
+  let Some(entries) = config_file(IMAGES).and_then(|dir| std::fs::read_dir(dir).ok()) else { return };
+  for path in entries.flatten().map(|e| e.path()) {
+    let grain = path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("grain-"));
+    if let Ok(bytes) = std::fs::read(&path) {
+      let _ = rustcreate_core::load_brush_image(&bytes, grain);
+    }
+  }
+}
+
 /// Paint with Ink, smudge with the Blender, erase with the Hard Airbrush.
 const DEFAULT_SELECTION: [&str; 3] = ["ink", "blender", "hard-airbrush"];
 
@@ -189,6 +210,7 @@ impl Default for Library {
 
 impl Library {
   pub fn load() -> Self {
+    register_images();
     let saved: Saved =
       config_file("brushes.json").and_then(|path| std::fs::read(path).ok()).and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
     Self::from_saved(saved)
@@ -254,9 +276,35 @@ impl Library {
 
   /// Copies a brush into "My brushes" and returns the copy's index.
   pub fn duplicate(&mut self, index: usize, name: String) -> usize {
+    self.push_custom(name, self.entries[index].brush)
+  }
+
+  fn push_custom(&mut self, name: String, brush: Brush) -> usize {
     let id = (1..).map(|n| format!("custom-{n}")).find(|id| self.find(id).is_none()).expect("a free id");
-    self.entries.push(Entry { id, name: Name::Custom(name), category: MINE, brush: self.entries[index].brush });
+    self.entries.push(Entry { id, name: Name::Custom(name), category: MINE, brush });
     self.entries.len() - 1
+  }
+
+  /// Imports a `.brushset`, `.brush` or `.abr` into My brushes and keeps its images, so the
+  /// brushes still work after a restart. Returns the first new brush.
+  pub fn import(&mut self, path: &Path) -> Result<usize, FileError> {
+    let bytes = std::fs::read(path)?;
+    let set = path.file_stem().map_or("Brush".into(), |s| s.to_string_lossy().into_owned());
+    let imported = match path.extension().map(|e| e.to_string_lossy().to_lowercase()).as_deref() {
+      Some("abr") => rustcreate_core::import_abr(&bytes, &set)?,
+      _ => rustcreate_core::import_brushset(&bytes, &set)?,
+    };
+    if let Some(dir) = config_file(IMAGES) {
+      std::fs::create_dir_all(&dir)?;
+      for image in &imported.images {
+        std::fs::write(dir.join(image_file(image.grain, image.id)), &image.png)?;
+      }
+    }
+    let first = self.entries.len();
+    for (name, brush) in imported.brushes {
+      self.push_custom(name, brush);
+    }
+    Ok(first)
   }
 
   /// Deletes one of the user's brushes; built-ins stay. Tools that used it go back to defaults.

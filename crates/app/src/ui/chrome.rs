@@ -9,6 +9,7 @@ use rustcreate_core::BlendMode;
 use super::icons::{self, Icon};
 use super::studio;
 use super::theme;
+use crate::canvas::ColorDrop;
 use crate::guides::Kind;
 use crate::i18n::Language;
 use crate::library::{CATEGORIES, MINE, Name};
@@ -94,7 +95,7 @@ impl App {
 
   /// The current color as a swatch ringed with the icon's gradient.
   fn color_button(&mut self, ui: &mut egui::Ui) {
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::click_and_drag());
     let center = rect.center();
     let ring: Vec<Pos2> = (0..=48).map(|i| center + 12.0 * Vec2::angled(i as f32 / 48.0 * std::f32::consts::TAU)).collect();
     for (i, pair) in ring.windows(2).enumerate() {
@@ -104,7 +105,15 @@ impl App {
     }
     let [r, g, b] = self.canvas.tools.primary;
     ui.painter().circle_filled(center, 9.0, Color32::from_rgb(r, g, b));
-    if response.on_hover_text(self.i18n.tr("ui-color")).clicked() {
+    // ColorDrop: drag the color onto the canvas to fill there; a drop follows the pointer.
+    response.dnd_set_drag_payload(ColorDrop([r, g, b]));
+    if response.dragged()
+      && let Some(at) = ui.input(|i| i.pointer.hover_pos())
+    {
+      let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("color-drop")));
+      painter.circle(at, 10.0, Color32::from_rgb(r, g, b), Stroke::new(2.0, Color32::WHITE));
+    }
+    if response.on_hover_text(self.i18n.tr("ui-color-tooltip")).clicked() {
       self.toggle(Popover::Color);
     }
   }
@@ -352,6 +361,17 @@ impl App {
       if ui.button(self.i18n.tr("ui-studio")).clicked() {
         self.studio = true;
         self.popover = None;
+      }
+      if ui.button(self.i18n.tr("ui-brush-import")).on_hover_text(self.i18n.tr("ui-brush-import-help")).clicked()
+        && let Some(path) = rfd::FileDialog::new().add_filter(self.i18n.tr("ui-brush-import-filter"), &["brushset", "brush", "abr"]).pick_file()
+      {
+        match self.canvas.tools.library.import(&path) {
+          Ok(first) => {
+            self.canvas.tools.select(first);
+            self.brush_category = Some(MINE);
+          }
+          Err(error) => self.error = Some(self.i18n.tr_args("ui-brush-import-failed", &[("error", error.to_string().into())])),
+        }
       }
     });
   }

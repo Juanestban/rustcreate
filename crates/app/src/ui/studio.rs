@@ -33,6 +33,7 @@ fn tip_name(tip: Tip) -> &'static str {
     Tip::Chalk => "ui-tip-chalk",
     Tip::Bristles => "ui-tip-bristles",
     Tip::Splatter => "ui-tip-splatter",
+    Tip::Image(_) => "ui-tip-imported",
   }
 }
 
@@ -42,6 +43,7 @@ fn grain_name(grain: Grain) -> &'static str {
     Grain::Paper => "ui-grain-paper",
     Grain::Canvas => "ui-grain-canvas",
     Grain::Noise => "ui-grain-noise",
+    Grain::Image(_) => "ui-grain-imported",
   }
 }
 

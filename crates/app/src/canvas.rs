@@ -91,7 +91,26 @@ pub struct Canvas {
   snapped: bool,
   /// Drawing Assist: where the stroke started (canvas pixels) and the grid direction it keeps.
   assist: (Pos2, Option<f32>),
+  /// Eyedropper loupe while picking: where (screen), and the color before picking started.
+  loupe: Option<(Pos2, [u8; 3])>,
 }
+
+/// A ring by the pointer: the color under it on top, the one before picking below.
+fn loupe(painter: &egui::Painter, at: Pos2, now: [u8; 3], before: [u8; 3]) {
+  let center = at + vec2(0.0, -70.0);
+  let half = |from: f32, color: [u8; 3]| {
+    let points: Vec<Pos2> = (0..=32).map(|i| center + 38.0 * Vec2::angled(from + i as f32 / 32.0 * std::f32::consts::PI)).collect();
+    painter.add(egui::Shape::line(points, egui::Stroke::new(16.0, egui::Color32::from_rgb(color[0], color[1], color[2]))));
+  };
+  half(std::f32::consts::PI, now);
+  half(0.0, before);
+  for radius in [29.0, 47.0] {
+    painter.circle_stroke(center, radius, egui::Stroke::new(1.0, egui::Color32::from_black_alpha(120)));
+  }
+}
+
+/// ColorDrop: the color being dragged from the color button onto the canvas.
+pub struct ColorDrop(pub [u8; 3]);
 
 impl Canvas {
   /// Registers the GPU renderer for `doc` with eframe's wgpu state.
@@ -108,6 +127,7 @@ impl Canvas {
       hold: (0.0, Pos2::ZERO),
       snapped: false,
       assist: (Pos2::ZERO, None),
+      loupe: None,
     }
   }
 
@@ -138,6 +158,9 @@ impl Canvas {
     ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, CanvasCallback { placement }));
     let to_screen = |p: Pos2| view.to_screen(rect.center(), canvas, p);
     self.tools.guides.draw(&ui.painter_at(rect), canvas, crate::ui::theme::ACCENT.gamma_multiply(0.75), to_screen);
+    if let Some((at, before)) = self.loupe {
+      loupe(ui.painter(), at, self.tools.primary, before);
+    }
     // The gradient's guide line while dragging.
     if let Some((_, start, _, end)) = &self.gradient {
       let (line, shadow) = (egui::Stroke::new(2.0, egui::Color32::WHITE), egui::Color32::from_black_alpha(90));
@@ -220,14 +243,29 @@ impl Canvas {
         && p.x >= 0.0
         && p.y >= 0.0
       {
+        let before = self.loupe.map_or(self.tools.primary, |(_, before)| before);
         let [r, g, b, a] = doc.pixel(p.x as u32, p.y as u32);
         if a > 0 {
           self.tools.primary = [r, g, b];
         }
+        self.loupe = response.interact_pointer_pos().map(|screen| (screen, before));
       }
       if released {
         self.tools.picking = false;
+        self.loupe = None;
       }
+      return;
+    }
+    self.loupe = None;
+    // ColorDrop: a color dropped from the color button fills like the bucket.
+    if let Some(drop) = response.dnd_release_payload::<ColorDrop>()
+      && let Some(p) = ui.input(|i| i.pointer.interact_pos()).map(&to_canvas)
+      && p.x >= 0.0
+      && p.y >= 0.0
+      && doc.fill(p.x as u32, p.y as u32, drop.0, self.tools.fill_threshold, self.tools.fill_all_layers)
+    {
+      self.tools.primary = drop.0;
+      self.tools.used_color();
       return;
     }
     if matches!(self.tools.tool, Tool::Fill | Tool::Gradient) && !pen.eraser {

@@ -163,6 +163,8 @@ struct Dab {
   size: f32,
 }
 
+type Textures = (Option<&'static [f32]>, Option<&'static [f32]>);
+
 /// A tile touched by the stroke: its pixels before the stroke and the stroke's coverage.
 struct StrokeTile {
   before: Vec<u8>,
@@ -414,15 +416,18 @@ impl Stroke {
   }
 
   /// How much dab `d` of `radius` covers canvas pixel (px, py): tip shape × grain.
-  fn shape(brush: &Brush, d: &Dab, radius: f32, px: u32, py: u32) -> f32 {
+  /// The brush's tip mask and grain texture, looked up once per dab rather than per pixel.
+  fn textures(brush: &Brush) -> Textures {
+    (brush.tip.mask(), brush.grain.texture())
+  }
+
+  fn shape(brush: &Brush, (mask, texture): Textures, d: &Dab, radius: f32, px: u32, py: u32) -> f32 {
     let (dx, dy) = (px as f32 + 0.5 - d.x, py as f32 + 0.5 - d.y);
     let (sin, cos) = d.angle.sin_cos();
     let (x, y) = ((dx * cos + dy * sin) / radius, (dy * cos - dx * sin) / radius);
-    let shape = brush.tip.coverage(x, y, brush.hardness, radius);
-    if shape <= 0.0 || brush.grain == Grain::None {
-      return shape;
-    }
-    let grain = brush.grain.value(px as f32, py as f32, brush.grain_scale);
+    let shape = brush.tip.covers(mask, x, y, brush.hardness, radius);
+    let Some(texture) = texture.filter(|_| shape > 0.0) else { return shape };
+    let grain = Grain::at(texture, px as f32, py as f32, brush.grain_scale);
     shape * (1.0 - brush.grain_depth.clamp(0.0, 1.0) * (1.0 - grain))
   }
 
@@ -438,6 +443,7 @@ impl Stroke {
   fn stamp(&mut self, doc: &mut Document, d: Dab, scale: f32, only: Option<&HashSet<(u32, u32)>>) {
     let radius = (self.diameter(d.pressure, d.at) * scale * d.size).max(1.0) / 2.0;
     let Some((x0, y0, x1, y1)) = self.bounds(&d, radius, doc.width, doc.height) else { return };
+    let textures = Self::textures(&self.brush);
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
     let flow = self.brush.flow * (1.0 - self.brush.pressure_flow * (1.0 - d.pressure));
     let opacity = self.brush.opacity.clamp(0.0, 1.0);
@@ -450,7 +456,7 @@ impl Stroke {
         let tile = self.tiles.entry((tx, ty)).or_insert_with(|| StrokeTile { before: pixels.to_vec(), coverage: vec![0.0; (TILE * TILE) as usize] });
         for py in y0.max(ty * TILE)..=y1.min(ty * TILE + TILE - 1) {
           for px in x0.max(tx * TILE)..=x1.min(tx * TILE + TILE - 1) {
-            let falloff = Self::shape(&self.brush, &d, radius, px, py);
+            let falloff = Self::shape(&self.brush, textures, &d, radius, px, py);
             if falloff <= 0.0 {
               continue;
             }
@@ -483,6 +489,7 @@ impl Stroke {
     let Some((from_x, from_y)) = self.smudged.replace((d.x, d.y)) else { return };
     let (width, height) = (doc.width, doc.height);
     let radius = (self.diameter(d.pressure, d.at) * d.size).max(1.0) / 2.0;
+    let textures = Self::textures(&self.brush);
     let Some((x0, y0, x1, y1)) = self.bounds(&d, radius, width, height) else { return };
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
     let strength = self.brush.opacity.clamp(0.0, 1.0) * (1.0 - self.brush.pressure_flow * (1.0 - d.pressure));
@@ -510,7 +517,7 @@ impl Stroke {
         let pixels = layer.tile_mut(tx, ty);
         for py in rows.clone() {
           for px in cols.clone() {
-            let weight = Self::shape(&self.brush, &d, radius, px, py) * strength;
+            let weight = Self::shape(&self.brush, textures, &d, radius, px, py) * strength;
             if weight <= 0.0 {
               continue;
             }

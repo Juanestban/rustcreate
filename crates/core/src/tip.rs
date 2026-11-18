@@ -1,8 +1,9 @@
-//! Brush tip shapes and grain textures. All of them are generated here from deterministic noise
-//! (ADR 0006: no third-party brush images), once, and cached. Brushes refer to them by name, so
-//! `Brush` stays a small `Copy` value.
+//! Brush tip shapes and grain textures. The built-in ones are generated here from deterministic
+//! noise (ADR 0006: no third-party brush images), once, and cached. Images from brushes the user
+//! imports are registered at run time. Brushes refer to them by name or id, so `Brush` stays a
+//! small `Copy` value.
 
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
 /// The shape a dab stamps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -19,6 +20,8 @@ pub enum Tip {
   Bristles,
   /// Uneven drops scattered in a disc.
   Splatter,
+  /// An imported shape, by the id `register` gave it. Round if it is not registered.
+  Image(u32),
 }
 
 impl Tip {
@@ -27,12 +30,26 @@ impl Tip {
   /// How strongly the dab covers the point (x, y), in the dab's own frame where the edge of the
   /// tip is at distance 1 from the center. `hardness` only applies to the analytic shapes.
   pub fn coverage(self, x: f32, y: f32, hardness: f32, radius: f32) -> f32 {
+    self.covers(self.mask(), x, y, hardness, radius)
+  }
+
+  /// The tip's mask, looked up once per dab: `None` for the analytic shapes.
+  pub(crate) fn mask(self) -> Option<&'static [f32]> {
     match self {
-      Tip::Round => edge(x.hypot(y), hardness, radius),
-      Tip::Square => edge(x.abs().max(y.abs()), hardness, radius),
-      Tip::Chalk => sample(mask(0, chalk), x, y),
-      Tip::Bristles => sample(mask(1, bristles), x, y),
-      Tip::Splatter => sample(mask(2, splatter), x, y),
+      Tip::Round | Tip::Square => None,
+      Tip::Chalk => Some(mask(0, chalk)),
+      Tip::Bristles => Some(mask(1, bristles)),
+      Tip::Splatter => Some(mask(2, splatter)),
+      Tip::Image(id) => image(id, false),
+    }
+  }
+
+  /// `coverage` with the mask already looked up.
+  pub(crate) fn covers(self, mask: Option<&[f32]>, x: f32, y: f32, hardness: f32, radius: f32) -> f32 {
+    match (mask, self) {
+      (Some(mask), _) => sample(mask, x, y),
+      (None, Tip::Square) => edge(x.abs().max(y.abs()), hardness, radius),
+      (None, _) => edge(x.hypot(y), hardness, radius),
     }
   }
 
@@ -54,6 +71,8 @@ pub enum Grain {
   Canvas,
   /// Fine, even speckle.
   Noise,
+  /// An imported texture, by the id `register` gave it. No grain if it is not registered.
+  Image(u32),
 }
 
 impl Grain {
@@ -61,12 +80,22 @@ impl Grain {
 
   /// 0..=1 at canvas pixel (x, y); `scale` 1 = one texture pixel per canvas pixel.
   pub fn value(self, x: f32, y: f32, scale: f32) -> f32 {
-    let texture = match self {
-      Grain::None => return 1.0,
-      Grain::Paper => grain(0, paper),
-      Grain::Canvas => grain(1, canvas),
-      Grain::Noise => grain(2, speckle),
-    };
+    self.texture().map_or(1.0, |texture| Self::at(texture, x, y, scale))
+  }
+
+  /// The texture, looked up once per dab: `None` means no grain.
+  pub(crate) fn texture(self) -> Option<&'static [f32]> {
+    match self {
+      Grain::None => None,
+      Grain::Paper => Some(grain(0, paper)),
+      Grain::Canvas => Some(grain(1, canvas)),
+      Grain::Noise => Some(grain(2, speckle)),
+      Grain::Image(id) => image(id, true),
+    }
+  }
+
+  /// `value` with the texture already looked up.
+  pub(crate) fn at(texture: &[f32], x: f32, y: f32, scale: f32) -> f32 {
     let scale = scale.max(0.05);
     let (u, v) = ((x / scale) as i64, (y / scale) as i64);
     let n = GRAIN_SIZE as i64;
@@ -86,8 +115,30 @@ fn edge(distance: f32, hardness: f32, radius: f32) -> f32 {
   }
 }
 
-const MASK_SIZE: usize = 128;
-const GRAIN_SIZE: usize = 256;
+pub(crate) const MASK_SIZE: usize = 128;
+pub(crate) const GRAIN_SIZE: usize = 256;
+
+/// Imported images: id, whether it is a grain, and its values. Never freed: a brush may still
+/// point at one, and they are few and small.
+static IMAGES: RwLock<Vec<(u32, bool, &'static [f32])>> = RwLock::new(Vec::new());
+
+fn image(id: u32, grain: bool) -> Option<&'static [f32]> {
+  IMAGES.read().expect("image registry").iter().find(|(i, g, _)| *i == id && *g == grain).map(|(_, _, v)| *v)
+}
+
+/// Registers an imported tip (`MASK_SIZE`²) or grain (`GRAIN_SIZE`²) of 8-bit values and returns
+/// its id, a hash of the pixels: the same image always gets the same id.
+pub(crate) fn register(grain: bool, pixels: &[u8]) -> u32 {
+  let side = if grain { GRAIN_SIZE } else { MASK_SIZE };
+  assert_eq!(pixels.len(), side * side, "registered images are normalized first");
+  // FNV-1a.
+  let id = pixels.iter().fold(0x811c_9dc5u32 ^ grain as u32, |h, &b| (h ^ b as u32).wrapping_mul(0x0100_0193));
+  if image(id, grain).is_none() {
+    let values: &'static [f32] = Box::leak(pixels.iter().map(|&b| b as f32 / 255.0).collect());
+    IMAGES.write().expect("image registry").push((id, grain, values));
+  }
+  id
+}
 
 fn mask(slot: usize, make: fn() -> Vec<f32>) -> &'static [f32] {
   static MASKS: [OnceLock<Vec<f32>>; 3] = [OnceLock::new(), OnceLock::new(), OnceLock::new()];
