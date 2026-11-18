@@ -52,6 +52,7 @@ pub struct Tools {
   pub gradient_to_clear: bool,
   /// QuickShape: a held stroke snaps to a clean shape (a setting).
   pub quickshape: bool,
+  pub guides: crate::guides::Guides,
   /// Colors painted with, newest first.
   pub recent: Vec<[u8; 3]>,
 }
@@ -70,6 +71,7 @@ impl Default for Tools {
       gradient: GradientKind::Linear,
       gradient_to_clear: false,
       quickshape: true,
+      guides: Default::default(),
       recent: Vec::new(),
     }
   }

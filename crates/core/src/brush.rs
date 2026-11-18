@@ -9,8 +9,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::guide::Mirror;
 use crate::tip::{self, Grain, Tip};
-use crate::{Document, TILE};
+use crate::{Document, Symmetry, TILE};
 
 /// Serializable for saved brush libraries; fields missing from older files take the defaults.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -195,6 +196,8 @@ pub struct Stroke {
   placed: u32,
   /// Raw pointer samples, for QuickShape.
   points: Vec<(f32, f32)>,
+  /// Symmetry: every dab is also stamped through each of these.
+  mirrors: Vec<Mirror>,
 }
 
 impl Document {
@@ -224,6 +227,7 @@ impl Document {
       direction: 0.0,
       placed: 0,
       points: Vec::new(),
+      mirrors: Vec::new(),
     })
   }
 
@@ -294,7 +298,7 @@ impl Stroke {
     }
     let tail = self.dabs.iter().position(|d| total - d.at < taper).unwrap_or(self.dabs.len());
     let mut affected = HashSet::new();
-    for d in &self.dabs[tail..] {
+    for d in self.dabs[tail..].iter().flat_map(|&d| self.copies(d)) {
       let radius = self.diameter(d.pressure, d.at) / 2.0;
       for ty in ((d.y - radius).max(0.0) as u32 / TILE)..=((d.y + radius).max(0.0) as u32 / TILE) {
         for tx in ((d.x - radius).max(0.0) as u32 / TILE)..=((d.x + radius).max(0.0) as u32 / TILE) {
@@ -312,9 +316,20 @@ impl Stroke {
     }
     for (i, d) in std::mem::take(&mut self.dabs).into_iter().enumerate() {
       let scale = if i >= tail { 0.15 + 0.85 * ((total - d.at) / taper).clamp(0.0, 1.0) } else { 1.0 };
-      self.stamp(doc, d, scale, Some(&affected));
+      for copy in self.copies(d) {
+        self.stamp(doc, copy, scale, Some(&affected));
+      }
     }
     end
+  }
+
+  /// Paints mirrored or rotated copies around `center` (canvas pixels). Call before painting;
+  /// smudge strokes stay single.
+  pub fn with_symmetry(mut self, symmetry: Symmetry, center: (f32, f32)) -> Self {
+    if !self.smudge {
+      self.mirrors = symmetry.mirrors(center);
+    }
+    self
   }
 
   /// The pointer samples so far, unsmoothed.
@@ -384,7 +399,18 @@ impl Stroke {
       return self.smudge_dab(doc, dab);
     }
     self.dabs.push(dab);
-    self.stamp(doc, dab, 1.0, None);
+    for copy in self.copies(dab) {
+      self.stamp(doc, copy, 1.0, None);
+    }
+  }
+
+  /// The dab and its symmetric copies.
+  fn copies(&self, d: Dab) -> Vec<Dab> {
+    let copy = |m: &Mirror| {
+      let (x, y) = m.point((d.x, d.y));
+      Dab { x, y, angle: m.angle(d.angle), ..d }
+    };
+    std::iter::once(d).chain(self.mirrors.iter().map(copy)).collect()
   }
 
   /// How much dab `d` of `radius` covers canvas pixel (px, py): tip shape × grain.
@@ -706,6 +732,24 @@ mod tests {
     assert_eq!(alpha(&doc, 0, 100, 150), 0, "the wobbly stroke is gone");
     assert!(doc.undo());
     assert_eq!(alpha(&doc, 0, 130, 50), 0, "still one undo step");
+  }
+
+  #[test]
+  fn symmetry_paints_copies_in_one_undo_step() {
+    let mut doc = Document::new(400, 400);
+    let brush = Brush { taper_end: 60.0, ..flat(8.0, 1.0) };
+    let mut stroke = doc.begin_stroke(brush, [0, 0, 0], false).unwrap().with_symmetry(Symmetry::Quadrant, (200.0, 200.0));
+    for i in 0..=40 {
+      stroke.add(&mut doc, 40.0 + i as f32 * 3.0, 60.0, 1.0);
+    }
+    stroke.finish(&mut doc);
+    for (x, y) in [(80, 60), (320, 60), (80, 340), (320, 340)] {
+      assert_eq!(alpha(&doc, 0, x, y), 255, "copy at {x},{y}");
+    }
+    // The end taper thins every copy's tail, not only the original's.
+    assert!(alpha(&doc, 0, 160, 64) < 255 && alpha(&doc, 0, 240, 336) < 255);
+    assert!(doc.undo());
+    assert_eq!(alpha(&doc, 0, 320, 340), 0);
   }
 
   #[test]

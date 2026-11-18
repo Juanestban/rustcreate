@@ -14,11 +14,11 @@
   and the "New canvas" dialog. A native error dialog when no DX12/Vulkan GPU is found. **All
   v0.1 features are in.** Phase 2 started: Smudge tool, end taper, pulled-string stabilizer, brush tips and grains,
   Brush Studio, the brush library with saved brushes and a brush per tool, the paint bucket and the
-  gradient, QuickShape, the color disc with harmonies and palettes.
+  gradient, QuickShape, the color disc with harmonies and palettes, drawing guides with symmetry.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: drawing
-  guides; `.brushset`/`.abr` import.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: `.brushset`/`.abr`
+  import.
 
 ## Phase 0 — Foundation
 
@@ -96,7 +96,10 @@
       modes (complementary, split, analogous, triadic, tetradic), hex field, palettes saved to
       `palettes.json` (new, rename, delete, add/remove colors)
 - [ ] Eyedropper loupe; palette import/export (.swatches, .aco, .ase)
-- [ ] Drawing guides: grid, perspective (1/2/3 point), symmetry
+- [x] Drawing guides: 2D grid and isometric with Drawing Assist (strokes keep to the grid's
+      directions); symmetry (vertical, horizontal, quadrant, radial 2–16) painted by the engine
+      in the same stroke, one undo step
+- [ ] Perspective guides (1/2/3 point); movable guide center; guide saved in the file
 - [ ] Import `.brushset` and `.abr` brushes the user owns
 
 ## Phase 3 — Photoshop-grade editing

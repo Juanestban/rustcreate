@@ -39,7 +39,6 @@ impl View {
     vec2(v.x * cos - v.y * sin, v.x * sin + v.y * cos)
   }
 
-  #[cfg(test)]
   pub fn to_screen(self, center: Pos2, canvas: Vec2, p: Pos2) -> Pos2 {
     center + self.offset + Self::rotate((p.to_vec2() - canvas / 2.0) * self.zoom, self.rotation)
   }
@@ -90,6 +89,8 @@ pub struct Canvas {
   /// stroke already snapped to a shape (it then ignores the pointer until released).
   hold: (f64, Pos2),
   snapped: bool,
+  /// Drawing Assist: where the stroke started (canvas pixels) and the grid direction it keeps.
+  assist: (Pos2, Option<f32>),
 }
 
 impl Canvas {
@@ -97,7 +98,17 @@ impl Canvas {
   pub fn new(render_state: &egui_wgpu::RenderState, doc: &Document) -> Self {
     let renderer = CanvasRenderer::new(&render_state.device, render_state.target_format, (doc.width, doc.height));
     render_state.renderer.write().callback_resources.insert(renderer);
-    Self { view: None, tools: Tools::default(), stroke: None, last_point: None, pen: None, gradient: None, hold: (0.0, Pos2::ZERO), snapped: false }
+    Self {
+      view: None,
+      tools: Tools::default(),
+      stroke: None,
+      last_point: None,
+      pen: None,
+      gradient: None,
+      hold: (0.0, Pos2::ZERO),
+      snapped: false,
+      assist: (Pos2::ZERO, None),
+    }
   }
 
   /// A new or opened document: a renderer of its size, the view fitted again. Tools stay.
@@ -125,6 +136,8 @@ impl Canvas {
     }
     let placement = view.placement(rect, canvas, ui.ctx().pixels_per_point());
     ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, CanvasCallback { placement }));
+    let to_screen = |p: Pos2| view.to_screen(rect.center(), canvas, p);
+    self.tools.guides.draw(&ui.painter_at(rect), canvas, crate::ui::theme::ACCENT.gamma_multiply(0.75), to_screen);
     // The gradient's guide line while dragging.
     if let Some((_, start, _, end)) = &self.gradient {
       let (line, shadow) = (egui::Stroke::new(2.0, egui::Color32::WHITE), egui::Color32::from_black_alpha(90));
@@ -238,6 +251,11 @@ impl Canvas {
         Tool::Smudge => doc.begin_smudge(brush),
         _ => doc.begin_stroke(brush, color, tool == Tool::Eraser),
       };
+      let center = (doc.width as f32 / 2.0, doc.height as f32 / 2.0);
+      let stroke = stroke.map(|s| match self.tools.guides.symmetry() {
+        Some(symmetry) => s.with_symmetry(symmetry, center),
+        None => s,
+      });
       // A locked layer refuses the stroke.
       if let Some(mut stroke) = stroke {
         if tool == Tool::Brush {
@@ -250,6 +268,7 @@ impl Canvas {
         }
         self.stroke = Some(stroke);
         self.hold = (ui.input(|i| i.time), origin);
+        self.assist = (p, None);
         self.snapped = false;
       }
     }
@@ -262,7 +281,7 @@ impl Canvas {
         if p.distance(self.hold.1) > HOLD_SLOP {
           self.hold = (now, p);
         }
-        let p = to_canvas(p);
+        let Some(p) = self.tools.guides.assist(self.assist.0, to_canvas(p), &mut self.assist.1) else { continue };
         stroke.add(doc, p.x, p.y, pressure);
       }
       // QuickShape: holding still at the end snaps the stroke to the shape it looks like.

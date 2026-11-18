@@ -9,12 +9,13 @@ use rustcreate_core::BlendMode;
 use super::icons::{self, Icon};
 use super::studio;
 use super::theme;
+use crate::guides::Kind;
 use crate::i18n::Language;
 use crate::library::{CATEGORIES, MINE, Name};
 use crate::settings::Theme;
 use crate::tools::Tool;
 use crate::{App, Pending};
-use rustcreate_core::GradientKind;
+use rustcreate_core::{GradientKind, Symmetry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Popover {
@@ -199,6 +200,8 @@ impl App {
       self.export_png();
     }
     ui.separator();
+    self.guides_section(ui);
+    ui.separator();
     // Settings: applied and saved as soon as they change.
     let mut settings = self.settings.clone();
     let muted = theme::palette(ui).muted;
@@ -223,6 +226,54 @@ impl App {
     }
     ui.separator();
     ui.label(RichText::new(format!("rustcreate {}", env!("CARGO_PKG_VERSION"))).small().color(theme::palette(ui).muted));
+  }
+
+  /// The drawing guide and Drawing Assist.
+  fn guides_section(&mut self, ui: &mut egui::Ui) {
+    let (guides, i18n) = (&mut self.canvas.tools.guides, &self.i18n);
+    ui.label(RichText::new(i18n.tr("ui-guide")).strong());
+    let kinds =
+      [(Kind::Off, "ui-guide-off"), (Kind::Grid, "ui-guide-grid"), (Kind::Isometric, "ui-guide-isometric"), (Kind::Symmetry, "ui-guide-symmetry")];
+    let name = |kind: Kind| kinds.iter().find(|(k, _)| *k == kind).map_or(String::new(), |(_, id)| i18n.tr(id));
+    egui::ComboBox::from_id_salt("guide").selected_text(name(guides.kind)).show_ui(ui, |ui| {
+      for (kind, id) in kinds {
+        ui.selectable_value(&mut guides.kind, kind, i18n.tr(id));
+      }
+    });
+    match guides.kind {
+      Kind::Off => return,
+      Kind::Grid | Kind::Isometric => {
+        ui.horizontal(|ui| {
+          ui.label(i18n.tr("ui-guide-spacing"));
+          ui.add(egui::Slider::new(&mut guides.spacing, 10.0..=1000.0).logarithmic(true).suffix(" px").fixed_decimals(0));
+        });
+      }
+      Kind::Symmetry => {
+        let mut radial = match guides.symmetry {
+          Symmetry::Radial(n) => n,
+          _ => 6,
+        };
+        ui.horizontal_wrapped(|ui| {
+          for (symmetry, id) in [
+            (Symmetry::Vertical, "ui-symmetry-vertical"),
+            (Symmetry::Horizontal, "ui-symmetry-horizontal"),
+            (Symmetry::Quadrant, "ui-symmetry-quadrant"),
+            (Symmetry::Radial(radial), "ui-symmetry-radial"),
+          ] {
+            let on = std::mem::discriminant(&guides.symmetry) == std::mem::discriminant(&symmetry);
+            if ui.selectable_label(on, i18n.tr(id)).clicked() {
+              guides.symmetry = symmetry;
+            }
+          }
+        });
+        if matches!(guides.symmetry, Symmetry::Radial(_))
+          && ui.add(egui::Slider::new(&mut radial, 2..=16).text(i18n.tr("ui-symmetry-copies"))).changed()
+        {
+          guides.symmetry = Symmetry::Radial(radial);
+        }
+      }
+    }
+    ui.checkbox(&mut guides.assist, i18n.tr("ui-guide-assist")).on_hover_text(i18n.tr("ui-guide-assist-help"));
   }
 
   /// Bucket and gradient options.
