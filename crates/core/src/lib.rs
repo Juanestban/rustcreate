@@ -100,6 +100,9 @@ pub struct Document {
   active: usize,
   next_id: u64,
   history: History,
+  /// Bumped by every undoable change, undo and redo: compare with the value at save time to
+  /// know whether there are unsaved changes.
+  revision: u64,
 }
 
 impl Document {
@@ -109,7 +112,8 @@ impl Document {
   }
 
   pub fn with_history(width: u32, height: u32, history: History) -> Self {
-    let mut doc = Self { width: width.clamp(1, MAX_SIDE), height: height.clamp(1, MAX_SIDE), layers: Vec::new(), active: 0, next_id: 1, history };
+    let mut doc =
+      Self { width: width.clamp(1, MAX_SIDE), height: height.clamp(1, MAX_SIDE), layers: Vec::new(), active: 0, next_id: 1, history, revision: 0 };
     let first = doc.new_layer();
     doc.layers.push(first);
     doc
@@ -142,6 +146,11 @@ impl Document {
   /// call it themselves.
   pub fn checkpoint(&mut self) {
     self.history.push(Snapshot::new(self.layers.clone(), self.active));
+    self.revision += 1;
+  }
+
+  pub fn revision(&self) -> u64 {
+    self.revision
   }
 
   /// A layer to paint on or edit. Call [`Document::checkpoint`] first to make it undoable.
@@ -169,6 +178,7 @@ impl Document {
     };
     self.layers = state.layers;
     self.active = state.active;
+    self.revision += u64::from(moved);
     moved
   }
 
@@ -236,6 +246,17 @@ impl Document {
     if self.active >= index {
       self.active -= 1;
     }
+    true
+  }
+
+  /// Erases everything on a layer (Delete / Backspace).
+  pub fn clear_layer(&mut self, index: usize) -> bool {
+    match self.layers.get(index) {
+      Some(layer) if !layer.locked && layer.painted_tiles() > 0 => {}
+      _ => return false,
+    }
+    self.checkpoint();
+    self.layers[index].tiles.clear();
     true
   }
 
@@ -367,6 +388,21 @@ mod tests {
     doc.checkpoint();
     // The first step holds the old (0, 0) tile alone; (1, 1) is still shared with the document.
     assert_eq!(doc.history().bytes(), TILE_BYTES);
+  }
+
+  #[test]
+  fn clear_layer_and_revision() {
+    let mut doc = Document::new(256, 256);
+    let saved = doc.revision();
+    assert!(!doc.clear_layer(0), "nothing to clear");
+    paint(&mut doc, 0, [1, 2, 3, 255]);
+    assert_ne!(doc.revision(), saved, "a change is unsaved");
+    assert!(doc.clear_layer(0));
+    assert_eq!(pixel(&doc, 0), None);
+    assert!(doc.undo());
+    assert_eq!(pixel(&doc, 0), Some([1, 2, 3, 255]));
+    let before = doc.revision();
+    assert!(!doc.redo() || doc.revision() > before);
   }
 
   #[test]

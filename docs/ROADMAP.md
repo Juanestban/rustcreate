@@ -6,12 +6,14 @@
   CI and release packaging copied from archi-games. App skeleton: eframe window with the icon,
   system dark/light theme, Fluent `en`/`es`, updater (startup + every 5 h, banner, verified
   install). `core`: tiled layers, layer stack operations, blend modes, undo/redo history, `.rcreate`
-  save/open and PNG export. `render`: wgpu compositor and canvas view with zoom, pan and rotation. Painting with the
-  mouse: brush engine, Pencil/Ink/Airbrush/Eraser, Photoshop tool and undo shortcuts.
+  save/open and PNG export. `render`: wgpu compositor and canvas view with zoom, pan and rotation.
+  Painting with the mouse: brush engine, Pencil/Ink/Airbrush/Eraser. Procreate-like interface:
+  top bar, sidebar sliders, brush/layers/color/actions panels, own icons, dark/light palette,
+  file dialogs, unsaved-changes prompt, all v0.1 Photoshop shortcuts.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** the Procreate-like interface (top bar, size/opacity sliders, brush picker, layers
-  panel, color picker), then pen input through Windows Ink.
+- **Next:** pen input through Windows Ink (pressure and tilt), then Settings (language, theme,
+  update checks) and the "New canvas" dialog.
 
 ## Phase 0 — Foundation
 
@@ -42,16 +44,18 @@
 - [x] Dirty-tile uploads
 
 ### App (`crates/app`)
-- [ ] Procreate-like layout: top bar, side size/opacity sliders, floating panels
-- [ ] Dark and light themes (system by default; egui's built-in themes work, own palette pending)
-- [ ] Own minimalist SVG icon set
-- [ ] Brush picker, layers panel, color picker (disc + HSB + history)
+- [x] Procreate-like layout: top bar, side size/opacity sliders, floating panels, `Tab` hides it
+- [x] Dark and light themes with an own palette (dark by default, switch in Actions; not
+      remembered until Settings exist)
+- [x] Own minimalist icon set (vector line icons painted in code, `ui/icons.rs`)
+- [x] Brush picker, layers panel (visibility, lock, rename, opacity, blend, duplicate, merge,
+      delete), color picker (HSV square + history) and eyedropper
 - [ ] Pen input through Windows Ink (`WM_POINTER`), mouse fallback
-- [ ] Photoshop shortcuts marked ✅ in `SHORTCUTS.md`
+- [x] Photoshop shortcuts marked ✅ in `SHORTCUTS.md`
 - [x] Fluent texts in English and Spanish (system language; test checks both files match)
 - [x] Updater: check at startup and every 5 h, banner, verified install (ADR 0002)
 - [ ] Settings: turn automatic update checks off, pick language and theme
-- [ ] Unsaved-changes prompt on close and before updating
+- [x] Unsaved-changes prompt on close, new, open and before updating; Open/Save/Export dialogs
 - [ ] Clear error when no DX12/Vulkan GPU is available
 
 ## Phase 2 — Painting depth
@@ -65,7 +69,7 @@
 - [ ] Stabilization modes (StreamLine, motion filtering)
 - [ ] QuickShape (hold to snap lines, ellipses, polygons)
 - [ ] Paint bucket (ColorDrop) with threshold, gradient tool
-- [ ] Eyedropper loupe, color palettes, harmony modes
+- [ ] Color disc, eyedropper loupe, color palettes, harmony modes
 - [ ] Drawing guides: grid, perspective (1/2/3 point), symmetry
 - [ ] Import `.brushset` and `.abr` brushes the user owns
 

@@ -4,26 +4,41 @@
 use eframe::egui::{InputState, Key, Modifiers};
 use rustcreate_core::{Brush, Document};
 
-use crate::i18n::I18n;
-
 /// v0.1 brushes, in Shift+B order, with their name tokens.
-const BRUSHES: [(&str, Brush); 3] = [("ui-brush-pencil", Brush::pencil()), ("ui-brush-ink", Brush::ink()), ("ui-brush-airbrush", Brush::airbrush())];
+pub const BRUSHES: [(&str, Brush); 3] =
+  [("ui-brush-pencil", Brush::pencil()), ("ui-brush-ink", Brush::ink()), ("ui-brush-airbrush", Brush::airbrush())];
 const MIN_SIZE: f32 = 1.0;
 const MAX_SIZE: f32 = 1000.0;
+const RECENT_COLORS: usize = 10;
 
 pub struct Tools {
   /// Each brush keeps its own size and opacity, like Procreate.
-  brushes: [Brush; 3],
-  selected: usize,
-  erasing: bool,
+  pub brushes: [Brush; 3],
+  pub selected: usize,
+  pub erasing: bool,
+  /// The eyedropper (I): the next press picks a color, then the brush comes back.
+  pub picking: bool,
+  /// The hand (H): primary drags pan instead of painting.
+  pub hand: bool,
   /// Straight sRGB.
-  primary: [u8; 3],
+  pub primary: [u8; 3],
   secondary: [u8; 3],
+  /// Colors painted with, newest first.
+  pub recent: Vec<[u8; 3]>,
 }
 
 impl Default for Tools {
   fn default() -> Self {
-    Self { brushes: BRUSHES.map(|(_, brush)| brush), selected: 1, erasing: false, primary: [0, 0, 0], secondary: [255, 255, 255] }
+    Self {
+      brushes: BRUSHES.map(|(_, brush)| brush),
+      selected: 1,
+      erasing: false,
+      picking: false,
+      hand: false,
+      primary: [0, 0, 0],
+      secondary: [255, 255, 255],
+      recent: Vec::new(),
+    }
   }
 }
 
@@ -33,21 +48,39 @@ impl Tools {
     (self.brushes[self.selected], self.primary, self.erasing)
   }
 
-  fn brush_mut(&mut self) -> &mut Brush {
+  pub fn brush_mut(&mut self) -> &mut Brush {
     &mut self.brushes[self.selected]
   }
 
-  /// Tool, brush and history shortcuts. History is left alone while a stroke is in progress.
+  /// Remembers the color a stroke starts with, for the color panel's history.
+  pub fn used_color(&mut self) {
+    let color = self.primary;
+    self.recent.retain(|c| *c != color);
+    self.recent.insert(0, color);
+    self.recent.truncate(RECENT_COLORS);
+  }
+
+  /// Tool, brush, layer and history shortcuts. The document is left alone while a stroke is in
+  /// progress. egui ignores extra Shift/Alt, so the longer combinations are checked first.
   pub fn shortcuts(&mut self, input: &mut InputState, doc: &mut Document, painting: bool) {
     if input.consume_key(Modifiers::SHIFT, Key::B) {
       self.selected = (self.selected + 1) % self.brushes.len();
-      self.erasing = false;
+      (self.erasing, self.hand) = (false, false);
     }
     if input.consume_key(Modifiers::NONE, Key::B) {
-      self.erasing = false;
+      (self.erasing, self.hand) = (false, false);
     }
     if input.consume_key(Modifiers::NONE, Key::E) {
-      self.erasing = true;
+      (self.erasing, self.hand) = (true, false);
+    }
+    if input.consume_key(Modifiers::NONE, Key::I) {
+      self.picking = !self.picking;
+    }
+    if input.consume_key(Modifiers::NONE, Key::H) {
+      self.hand = !self.hand;
+    }
+    if !painting {
+      layer_shortcuts(input, doc);
     }
     if input.consume_key(Modifiers::NONE, Key::OpenBracket) {
       self.brush_mut().size = (self.brush_mut().size / 1.1).max(MIN_SIZE);
@@ -79,23 +112,41 @@ impl Tools {
       doc.undo();
     }
   }
+}
 
-  /// "Ink · 12 px · 100 %", or the eraser with the brush it uses.
-  pub fn status(&self, i18n: &I18n) -> String {
-    let brush = self.brushes[self.selected];
-    let name = i18n.tr(BRUSHES[self.selected].0);
-    let tool = if self.erasing { i18n.tr_args("ui-tool-eraser", &[("brush", name.into())]) } else { name };
-    i18n.tr_args(
-      "ui-brush-status",
-      &[("tool", tool.into()), ("size", (brush.size.round() as i64).into()), ("opacity", ((brush.opacity * 100.0).round() as i64).into())],
-    )
+fn layer_shortcuts(input: &mut InputState, doc: &mut Document) {
+  let active = doc.active();
+  let top = doc.layers().len() - 1;
+  if input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::N) {
+    doc.add_layer();
+  }
+  if input.consume_key(Modifiers::COMMAND, Key::J) {
+    doc.duplicate_layer(active);
+  }
+  if input.consume_key(Modifiers::COMMAND, Key::E) {
+    doc.merge_down(active);
+  }
+  if input.consume_key(Modifiers::COMMAND, Key::OpenBracket) && active > 0 {
+    doc.move_layer(active, active - 1);
+  }
+  if input.consume_key(Modifiers::COMMAND, Key::CloseBracket) && active < top {
+    doc.move_layer(active, active + 1);
+  }
+  // Before the plain [ ]: Alt+[ would match them too.
+  if input.consume_key(Modifiers::ALT, Key::OpenBracket) {
+    doc.select(active.saturating_sub(1));
+  }
+  if input.consume_key(Modifiers::ALT, Key::CloseBracket) {
+    doc.select((active + 1).min(top));
+  }
+  if input.consume_key(Modifiers::NONE, Key::Backspace) || input.consume_key(Modifiers::NONE, Key::Delete) {
+    doc.clear_layer(doc.active());
   }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::i18n::Language;
   use eframe::egui::{Event, RawInput};
 
   fn press(tools: &mut Tools, doc: &mut Document, modifiers: Modifiers, key: Key) {
@@ -124,7 +175,33 @@ mod tests {
     assert_eq!(tools.current().1, [0, 0, 0]);
     press(&mut tools, &mut doc, Modifiers::SHIFT, Key::B);
     assert_eq!(tools.current().0.size, Brush::airbrush().size, "Shift+B cycles to the airbrush");
-    assert_eq!(tools.status(&I18n::new(Language::En)), "Airbrush · 120 px · 100 %");
+  }
+
+  #[test]
+  fn photoshop_layer_shortcuts() {
+    let (mut tools, mut doc) = (Tools::default(), Document::new(10, 10));
+    press(&mut tools, &mut doc, Modifiers::COMMAND | Modifiers::SHIFT, Key::N);
+    assert_eq!((doc.layers().len(), doc.active()), (2, 1));
+    let top = doc.layers()[1].id;
+    press(&mut tools, &mut doc, Modifiers::ALT, Key::OpenBracket);
+    assert_eq!(doc.active(), 0, "Alt+[ selects below and does not shrink the brush");
+    assert_eq!(tools.current().0.size, Brush::ink().size);
+    press(&mut tools, &mut doc, Modifiers::COMMAND, Key::CloseBracket);
+    assert_eq!(doc.layers()[0].id, top, "Ctrl+] moves the layer up");
+    press(&mut tools, &mut doc, Modifiers::COMMAND, Key::J);
+    assert_eq!(doc.layers().len(), 3);
+    press(&mut tools, &mut doc, Modifiers::COMMAND, Key::E);
+    assert_eq!(doc.layers().len(), 2);
+  }
+
+  #[test]
+  fn recent_colors_are_unique_newest_first() {
+    let mut tools = Tools::default();
+    for color in [[1, 0, 0], [2, 0, 0], [1, 0, 0]] {
+      tools.primary = color;
+      tools.used_color();
+    }
+    assert_eq!(tools.recent, [[1, 0, 0], [2, 0, 0]]);
   }
 
   #[test]

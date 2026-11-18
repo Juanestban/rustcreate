@@ -6,7 +6,6 @@ use eframe::egui_wgpu::{self, wgpu};
 use rustcreate_core::{Document, Stroke};
 use rustcreate_render::{CanvasRenderer, Placement};
 
-use crate::i18n::I18n;
 use crate::tools::Tools;
 
 const MIN_ZOOM: f32 = 0.01;
@@ -75,7 +74,7 @@ impl View {
 
 pub struct Canvas {
   view: Option<View>,
-  tools: Tools,
+  pub tools: Tools,
   stroke: Option<Stroke>,
   /// Where the last stroke ended, in canvas pixels, for Shift+click lines.
   last_point: Option<(f32, f32)>,
@@ -89,15 +88,24 @@ impl Canvas {
     Self { view: None, tools: Tools::default(), stroke: None, last_point: None }
   }
 
+  /// A new or opened document: a renderer of its size, the view fitted again. Tools stay.
+  pub fn reset(&mut self, render_state: &egui_wgpu::RenderState, doc: &Document) {
+    let tools = std::mem::take(&mut self.tools);
+    *self = Self { tools, ..Self::new(render_state, doc) };
+  }
+
   /// Draws the canvas filling `ui`, after handling painting, view gestures and shortcuts.
-  pub fn show(&mut self, ui: &mut egui::Ui, render_state: &egui_wgpu::RenderState, doc: &mut Document, i18n: &I18n) {
+  /// `keys` is false while a text field has the keyboard.
+  pub fn show(&mut self, ui: &mut egui::Ui, render_state: &egui_wgpu::RenderState, doc: &mut Document, keys: bool) {
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
     let canvas = vec2(doc.width as f32, doc.height as f32);
     let view = self.view.get_or_insert_with(|| View::fit(rect.size(), canvas));
-    handle_input(ui, &response, rect, canvas, view);
+    handle_input(ui, &response, rect, canvas, view, self.tools.hand);
     let view = *view;
     let painting = self.stroke.is_some();
-    ui.input_mut(|input| self.tools.shortcuts(input, doc, painting));
+    if keys {
+      ui.input_mut(|input| self.tools.shortcuts(input, doc, painting));
+    }
     self.paint(ui, &response, |p| view.to_canvas(rect.center(), canvas, p), doc);
 
     if let Some(renderer) = render_state.renderer.write().callback_resources.get_mut::<CanvasRenderer>() {
@@ -105,24 +113,40 @@ impl Canvas {
     }
     let placement = view.placement(rect, canvas, ui.ctx().pixels_per_point());
     ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, CanvasCallback { placement }));
-    // shortcut: a status line until the brush and color panels exist.
-    let status = ui.painter().layout_no_wrap(self.tools.status(i18n), egui::FontId::proportional(13.0), ui.visuals().weak_text_color());
-    ui.painter().galley(rect.left_bottom() + vec2(12.0, -12.0 - status.size().y), status, ui.visuals().weak_text_color());
   }
 
   /// Turns primary-button presses and drags into strokes. Space and R drags belong to the view.
   fn paint(&mut self, ui: &egui::Ui, response: &egui::Response, to_canvas: impl Fn(Pos2) -> Pos2, doc: &mut Document) {
-    let (pressed, released, shift, view_drag, origin, moves) = ui.input(|i| {
+    let (pressed, released, shift, alt, view_drag, origin, moves) = ui.input(|i| {
       let moves: Vec<Pos2> = i.events.iter().filter_map(|e| if let Event::PointerMoved(p) = e { Some(*p) } else { None }).collect();
       (
         i.pointer.primary_pressed(),
         i.pointer.primary_released(),
         i.modifiers.shift,
-        i.key_down(Key::Space) || i.key_down(Key::R),
+        i.modifiers.alt,
+        i.key_down(Key::Space) || i.key_down(Key::R) || self.tools.hand,
         i.pointer.press_origin(),
         moves,
       )
     });
+    // Eyedropper: I, or Alt held. Drag to scrub; it samples what is visible.
+    if (self.tools.picking || alt) && self.stroke.is_none() && !view_drag {
+      if response.is_pointer_button_down_on()
+        && let Some(p) = response.interact_pointer_pos()
+        && let p = to_canvas(p)
+        && p.x >= 0.0
+        && p.y >= 0.0
+      {
+        let [r, g, b, a] = doc.pixel(p.x as u32, p.y as u32);
+        if a > 0 {
+          self.tools.primary = [r, g, b];
+        }
+      }
+      if released {
+        self.tools.picking = false;
+      }
+      return;
+    }
     // shortcut: mouse and trackpad paint at full pressure; pen pressure comes with Windows Ink (ADR 0004).
     const PRESSURE: f32 = 1.0;
     if pressed
@@ -134,6 +158,9 @@ impl Canvas {
       let (brush, color, erase) = self.tools.current();
       // A locked layer refuses the stroke.
       if let Some(mut stroke) = doc.begin_stroke(brush, color, erase) {
+        if !erase {
+          self.tools.used_color();
+        }
         let p = to_canvas(origin);
         match self.last_point {
           Some(from) if shift => stroke.line(doc, from, (p.x, p.y), PRESSURE),
@@ -155,7 +182,7 @@ impl Canvas {
   }
 }
 
-fn handle_input(ui: &egui::Ui, response: &egui::Response, rect: Rect, canvas: Vec2, view: &mut View) {
+fn handle_input(ui: &egui::Ui, response: &egui::Response, rect: Rect, canvas: Vec2, view: &mut View, hand: bool) {
   let center = rect.center();
   let pointer = response.hover_pos();
   let anchor = pointer.map_or(Vec2::ZERO, |p| p - center);
@@ -200,8 +227,8 @@ fn handle_input(ui: &egui::Ui, response: &egui::Response, rect: Rect, canvas: Ve
       // Hold R and drag: turn by the angle the pointer swept around the area center.
       let (now, before) = (p - center, p - delta - center);
       view.rotate_at(now.angle() - before.angle(), Vec2::ZERO);
-    } else if space || middle {
-      // Hold Space (or the middle button) and drag: pan.
+    } else if space || middle || hand {
+      // Hold Space (or the middle button, or the hand tool) and drag: pan.
       view.offset += delta;
     }
   }

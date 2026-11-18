@@ -168,6 +168,19 @@ impl Document {
     out
   }
 
+  /// The visible color at a canvas pixel, unpremultiplied RGBA (the eyedropper). Outside the
+  /// canvas or where nothing is painted it is transparent.
+  pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+    if x >= self.width || y >= self.height {
+      return [0; 4];
+    }
+    let Some(tile) = self.composite_tile(x / TILE, y / TILE) else { return [0; 4] };
+    let p = (((y % TILE) * TILE + x % TILE) * 4) as usize;
+    let mut rgba: [u8; 4] = tile[p..p + 4].try_into().expect("4 bytes");
+    unpremultiply(&mut rgba);
+    rgba
+  }
+
   /// The composited image scaled down (box filter) to fit `THUMBNAIL_SIDE`: premultiplied
   /// pixels, width, height.
   fn thumbnail(&self) -> (Vec<u8>, u32, u32) {
@@ -395,6 +408,15 @@ mod tests {
     let mismatched = write(&manifest(1, 4, layer), &[("layers/1.png", &small)]);
     assert!(matches!(Document::read_rcreate(mismatched), Err(FileError::Invalid(_))));
     assert!(matches!(Document::read_rcreate(Cursor::new(b"not a zip".to_vec())), Err(FileError::Zip(_))));
+  }
+
+  #[test]
+  fn eyedropper_reads_the_visible_color() {
+    let mut doc = Document::new(300, 300);
+    doc.layer_mut(0).unwrap().tile_mut(1, 1)[..4].copy_from_slice(&[100, 50, 0, 200]);
+    assert_eq!(doc.pixel(256, 256), [128, 64, 0, 200]);
+    assert_eq!(doc.pixel(0, 0), [0; 4]);
+    assert_eq!(doc.pixel(999, 0), [0; 4]);
   }
 
   #[test]
