@@ -27,6 +27,8 @@ pub struct Transform {
 impl Document {
   /// Lifts the active layer's selected pixels for a Free Transform. `None` if the layer is
   /// locked or nothing is there to move.
+  // shortcut: moves the layer's pixels only; a layer mask stays where it is. Transform the
+  // mask too (or target it, like painting) when that is missed.
   pub fn begin_transform(&mut self) -> Option<Transform> {
     let layer = &self.layers[self.active];
     if layer.locked {
@@ -92,7 +94,7 @@ impl Transform {
     // layer took 76 ms in release, M-series Mac); move to the GPU if transforming big layers lags.
     let Some(inverse) = invert(m) else { return };
     let (width, height) = (doc.width, doc.height);
-    let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
+    let Some(layer) = doc.find_mut(self.layer_id) else { return };
     for key in self.drawn.drain() {
       layer.set_tile(key, self.lifted.get(&key).cloned());
     }

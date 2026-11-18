@@ -67,6 +67,9 @@ pub struct Layer {
   pub alpha_lock: bool,
   /// Clipping mask: shows only where the base layer below (the first one not clipped) has paint.
   pub clip: bool,
+  /// Layer mask: grayscale, black hides and white shows. Stored like a layer whose missing
+  /// (transparent) pixels count as white, so an empty mask shows everything.
+  pub mask: Option<Box<Layer>>,
   /// Only tiles that were painted exist; a missing tile is fully transparent.
   tiles: HashMap<(u32, u32), Tile>,
   /// Tiles written through `tile_mut` since the renderer last looked (see `take_dirty`).
@@ -84,6 +87,7 @@ impl Layer {
       blend: BlendMode::Normal,
       alpha_lock: false,
       clip: false,
+      mask: None,
       tiles: HashMap::new(),
       dirty: HashSet::new(),
     }
@@ -148,6 +152,8 @@ pub struct Document {
   pub guide: Option<serde_json::Value>,
   /// What painting is limited to; `None` = the whole canvas. Not saved in the file.
   selection: Option<Selection>,
+  /// Brush, fill and gradient go to the active layer's mask instead of its pixels.
+  editing_mask: bool,
 }
 
 impl Document {
@@ -167,6 +173,7 @@ impl Document {
       revision: 0,
       guide: None,
       selection: None,
+      editing_mask: false,
     };
     let first = doc.new_layer();
     doc.layers.push(first);
@@ -275,6 +282,9 @@ impl Document {
     let mut copy = original.clone();
     self.checkpoint();
     copy.id = self.take_id();
+    if let Some(mask) = &mut copy.mask {
+      mask.id = self.take_id();
+    }
     copy.name = format!("{} copy", copy.name);
     self.layers.insert(index + 1, copy);
     self.active = index + 1;
@@ -306,6 +316,7 @@ impl Document {
     let lower = &mut self.layers[index - 1];
     if !upper.hidden {
       for (&(tx, ty), tile) in &upper.tiles {
+        let tile = &*blend::masked(tile, upper.mask.as_deref(), tx, ty);
         if upper.clip {
           // A clipped layer merges only where its base has paint.
           let Some(base) = lower.tile(tx, ty) else { continue };
@@ -345,6 +356,79 @@ impl Document {
   fn new_layer(&mut self) -> Layer {
     let id = self.take_id();
     Layer::new(id, format!("Layer {id}"))
+  }
+
+  /// Gives a layer an empty mask (everything shown) and starts editing it. `false` if it has one.
+  pub fn add_mask(&mut self, index: usize) -> bool {
+    if self.layers.get(index).is_none_or(|l| l.mask.is_some()) {
+      return false;
+    }
+    self.checkpoint();
+    let id = self.take_id();
+    self.layers[index].mask = Some(Box::new(Layer::new(id, "Mask".into())));
+    self.active = index;
+    self.editing_mask = true;
+    true
+  }
+
+  /// Removes a layer's mask; with `apply`, its pixels are cut by the mask first.
+  pub fn remove_mask(&mut self, index: usize, apply: bool) -> bool {
+    if self.layers.get(index).is_none_or(|l| l.mask.is_none()) {
+      return false;
+    }
+    self.checkpoint();
+    let layer = &mut self.layers[index];
+    let mask = layer.mask.take().expect("checked");
+    if apply {
+      for key in layer.tiles.keys().copied().collect::<Vec<_>>() {
+        let masked = blend::masked(&layer.tiles[&key], Some(&mask), key.0, key.1).into_owned();
+        layer.set_tile(key, Some(Arc::from(masked)));
+      }
+    }
+    if index == self.active {
+      self.editing_mask = false;
+    }
+    true
+  }
+
+  /// Whether brush, fill and gradient paint the active layer's mask.
+  pub fn editing_mask(&self) -> bool {
+    self.editing_mask && self.layers[self.active].mask.is_some()
+  }
+
+  pub fn set_editing_mask(&mut self, on: bool) {
+    self.editing_mask = on;
+  }
+
+  /// What painting changes: the active layer, or its mask while editing it.
+  pub(crate) fn target(&self) -> &Layer {
+    match &self.layers[self.active].mask {
+      Some(mask) if self.editing_mask => mask,
+      _ => &self.layers[self.active],
+    }
+  }
+
+  pub(crate) fn target_mut(&mut self) -> &mut Layer {
+    if self.editing_mask() { self.layers[self.active].mask.as_deref_mut().expect("editing a mask") } else { &mut self.layers[self.active] }
+  }
+
+  /// A layer or a mask by id (strokes and gradients remember which they paint).
+  pub(crate) fn find_mut(&mut self, id: u64) -> Option<&mut Layer> {
+    self.layers.iter_mut().find_map(|l| if l.id == id { Some(l) } else { l.mask.as_deref_mut().filter(|m| m.id == id) })
+  }
+
+  pub(crate) fn find(&self, id: u64) -> Option<&Layer> {
+    self.layers.iter().find_map(|l| if l.id == id { Some(l) } else { l.mask.as_deref().filter(|m| m.id == id) })
+  }
+
+  /// A mask is painted in gray: color becomes how much it shows.
+  pub(crate) fn paint_color(&self, color: [u8; 3]) -> [u8; 3] {
+    if self.editing_mask() {
+      let gray = ((color[0] as u32 * 54 + color[1] as u32 * 183 + color[2] as u32 * 19) / 256) as u8;
+      [gray; 3]
+    } else {
+      color
+    }
   }
 
   fn take_id(&mut self) -> u64 {
@@ -540,5 +624,26 @@ mod tests {
     assert_eq!((&tile[8..12], &tile[28..32]), (&[255u8, 0, 0, 255][..], &[0u8, 0, 0, 0][..]), "red only over the blue base");
     doc.layer_mut(0).unwrap().hidden = true;
     assert!(doc.composite_tile(0, 0).is_none_or(|t| t.iter().all(|&v| v == 0)), "a hidden base hides its clipped layers");
+  }
+
+  #[test]
+  fn masks_hide_with_black_and_apply() {
+    let mut doc = Document::new(10, 1);
+    doc.layer_mut(0).unwrap().tile_mut(0, 0)[..4 * 10].copy_from_slice(&[0, 0, 255, 255].repeat(10));
+    assert!(doc.add_mask(0) && doc.editing_mask() && !doc.add_mask(0));
+    assert_eq!(doc.composite_tile(0, 0).unwrap()[3], 255, "an empty mask shows everything");
+    doc.select_shape(&SelectShape::Rectangle((0.0, 0.0), (5.0, 1.0)), SelectMode::Replace);
+    // A colored fill paints the mask in gray: pure red is dark, so it mostly hides.
+    assert!(doc.fill(0, 0, [255, 0, 0], 0.1, false));
+    let mask = doc.layers()[0].mask.as_ref().unwrap().tile(0, 0).unwrap();
+    assert_eq!((mask[0], mask[1], mask[2]), (53, 53, 53), "masks are gray");
+    assert!(doc.fill(0, 0, [0, 0, 0], 0.1, false));
+    let tile = doc.composite_tile(0, 0).unwrap();
+    assert_eq!((tile[3], tile[4 * 8 + 3]), (0, 255), "black hides, the rest shows");
+    assert_eq!(doc.layers()[0].tile(0, 0).unwrap()[3], 255, "the layer's own pixels are untouched");
+    assert!(doc.remove_mask(0, true) && !doc.editing_mask());
+    assert_eq!(doc.layers()[0].tile(0, 0).unwrap()[3], 0, "applying cuts the pixels");
+    doc.undo();
+    assert!(doc.layers()[0].mask.is_some(), "undo brings the mask back");
   }
 }

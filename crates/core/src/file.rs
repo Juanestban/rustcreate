@@ -63,6 +63,9 @@ struct LayerInfo {
   alpha_lock: bool,
   #[serde(default)]
   clip: bool,
+  /// The layer has `masks/{id}.png`.
+  #[serde(default)]
+  mask: bool,
   id: u64,
   name: String,
   opacity: f32,
@@ -100,6 +103,7 @@ impl Document {
         .map(|l| LayerInfo {
           alpha_lock: l.alpha_lock,
           clip: l.clip,
+          mask: l.mask.is_some(),
           id: l.id,
           name: l.name.clone(),
           opacity: l.opacity,
@@ -116,6 +120,10 @@ impl Document {
     for layer in &self.layers {
       zip.start_file(format!("layers/{}.png", layer.id), stored)?;
       write_png(&mut zip, self.width, self.height, png::Compression::Fast, |tx, ty| layer.tile(tx, ty).map(Cow::Borrowed))?;
+      if let Some(mask) = &layer.mask {
+        zip.start_file(format!("masks/{}.png", layer.id), stored)?;
+        write_png(&mut zip, self.width, self.height, png::Compression::Fast, |tx, ty| mask.tile(tx, ty).map(Cow::Borrowed))?;
+      }
     }
 
     zip.start_file("thumbnail.png", stored)?;
@@ -161,9 +169,23 @@ impl Document {
       (layer.alpha_lock, layer.clip) = (info.alpha_lock, info.clip);
       layer.blend = info.blend;
       read_layer_png(&png, doc.width, doc.height, &mut layer)?;
+      if info.mask {
+        let mut png = Vec::new();
+        zip.by_name(&format!("masks/{}.png", info.id))?.read_to_end(&mut png)?;
+        // Its id is given below, once every layer id is known.
+        let mut mask = Layer::new(0, "Mask".into());
+        read_layer_png(&png, doc.width, doc.height, &mut mask)?;
+        layer.mask = Some(Box::new(mask));
+      }
       doc.layers.push(layer);
     }
     doc.next_id = doc.layers.iter().map(|l| l.id).max().unwrap_or(0) + 1;
+    for i in 0..doc.layers.len() {
+      if doc.layers[i].mask.is_some() {
+        let id = doc.take_id();
+        doc.layers[i].mask.as_mut().expect("checked").id = id;
+      }
+    }
     doc.active = manifest.active.min(doc.layers.len() - 1);
     Ok(doc)
   }
@@ -181,6 +203,8 @@ impl Document {
   pub fn composite_tile(&self, tx: u32, ty: u32) -> Option<Vec<u8>> {
     let mut out: Option<Vec<u8>> = None;
     // The base of a clipping group: its tile, and whether it shows at all.
+    // shortcut: clipping follows the base's paint, not its mask (the GPU does the same); pass
+    // the base's mask along if people mask clipping bases.
     let mut base: (Option<&[u8]>, bool) = (None, false);
     for (i, layer) in self.layers.iter().enumerate() {
       let clipped = layer.clip && i > 0;
@@ -191,6 +215,7 @@ impl Document {
         continue;
       }
       let Some(tile) = layer.tile(tx, ty) else { continue };
+      let tile = &*blend::masked(tile, layer.mask.as_deref(), tx, ty);
       let out = out.get_or_insert_with(|| vec![0; TILE_BYTES]);
       if clipped {
         // Only where the base has paint: scale the clipped layer by the base's alpha.
@@ -393,6 +418,15 @@ mod tests {
     let mut opened = opened;
     opened.add_layer();
     assert_eq!(opened.layers()[2].id, 3, "new ids continue after the loaded ones");
+
+    // A mask comes back with the layer and keeps hiding what it hid.
+    assert!(opened.add_mask(0));
+    assert!(opened.fill(5, 5, [0, 0, 0], 0.1, false));
+    opened.save(&path).unwrap();
+    let again = Document::open(&path).unwrap();
+    assert!(again.layers()[0].mask.is_some());
+    assert_eq!(again.composite_tile(1, 1).map(|t| t[3]), opened.composite_tile(1, 1).map(|t| t[3]));
+    assert_ne!(again.layers()[0].mask.as_ref().unwrap().id, again.layers()[2].id, "mask ids do not clash");
     std::fs::remove_dir_all(dir).unwrap();
   }
 

@@ -17,7 +17,7 @@ struct Reference<'a> {
 impl Reference<'_> {
   fn tile(&mut self, tx: u32, ty: u32) -> Option<Arc<[u8]>> {
     if !self.all_layers {
-      return self.doc.layers[self.doc.active].tiles.get(&(tx, ty)).cloned();
+      return self.doc.target().tiles.get(&(tx, ty)).cloned();
     }
     let doc = self.doc;
     self.composites.entry((tx, ty)).or_insert_with(|| doc.composite_tile(tx, ty).map(Arc::from)).clone()
@@ -81,7 +81,8 @@ impl Document {
     self.checkpoint();
     let (width, height) = (self.width, self.height);
     let selection = self.selection.clone();
-    let layer = &mut self.layers[self.active];
+    let color = self.paint_color(color);
+    let layer = self.target_mut();
     let alpha_lock = layer.alpha_lock;
     // One pixel of margin for the grown edge.
     let (x0, y0, x1, y1) = (x0.saturating_sub(1), y0.saturating_sub(1), (x1 + 1).min(width - 1), (y1 + 1).min(height - 1));
@@ -132,10 +133,15 @@ impl Document {
   /// Starts a gradient on the active layer, as one undo step. `None` if it is locked. `colors`
   /// are straight sRGB + alpha for the start and the end.
   pub fn begin_gradient(&mut self, kind: GradientKind, colors: [[u8; 4]; 2]) -> Option<Gradient> {
-    let layer = &self.layers[self.active];
-    if layer.locked {
+    if self.layers[self.active].locked {
       return None;
     }
+    let gray = |c: [u8; 4]| {
+      let [r, g, b] = self.paint_color([c[0], c[1], c[2]]);
+      [r, g, b, c[3]]
+    };
+    let colors = colors.map(gray);
+    let layer = self.target();
     let (layer_id, before) = (layer.id, layer.tiles.clone());
     self.checkpoint();
     Some(Gradient { layer_id, before, kind, colors })
@@ -170,7 +176,7 @@ impl Gradient {
     let (width, height) = (doc.width, doc.height);
     let (tiles_x, tiles_y) = doc.tiles();
     let selection = doc.selection.clone();
-    let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
+    let Some(layer) = doc.find_mut(self.layer_id) else { return };
     let alpha_lock = layer.alpha_lock;
     let (dx, dy) = (to.0 - from.0, to.1 - from.1);
     let length2 = (dx * dx + dy * dy).max(1e-6);

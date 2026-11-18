@@ -19,12 +19,15 @@ struct LayerParams {
   mode: u32,
   // 1 = clipping mask: the layer only shows where `base` has paint.
   clip: u32,
+  // 1 = the layer has a mask: gray shows, black hides, transparent counts as white.
+  has_mask: u32,
 }
 
 @group(0) @binding(0) var below: texture_2d<f32>;
 @group(0) @binding(1) var layer: texture_2d<f32>;
 @group(0) @binding(2) var<uniform> params: LayerParams;
 @group(0) @binding(3) var base: texture_2d<f32>;
+@group(0) @binding(4) var mask: texture_2d<f32>;
 
 fn hard_light(cs: f32, cd: f32) -> f32 {
   if cs <= 0.5 {
@@ -62,6 +65,10 @@ fn composite(in: FullscreenOut) -> @location(0) vec4<f32> {
   let p = vec2<i32>(in.position.xy);
   let d = textureLoad(below, p, 0);
   var s = textureLoad(layer, p, 0) * params.opacity;
+  if params.has_mask == 1u {
+    let m = textureLoad(mask, p, 0);
+    s *= min(dot(m.rgb, vec3<f32>(54.0, 183.0, 19.0) / 256.0) + 1.0 - m.a, 1.0);
+  }
   if params.clip == 1u {
     s *= textureLoad(base, p, 0).a;
   }

@@ -7,7 +7,8 @@
 
 Documents need to store layers losslessly with their properties, open fast, be easy to inspect
 and grow later to animation frames, masks and adjustment layers. Optional per-layer fields
-(`alpha_lock`, `clip`) default to `false` when missing, so they did not bump FORMAT.
+(`alpha_lock`, `clip`, `mask`) default to `false` when missing, so they did not bump FORMAT. A
+layer with `mask: true` has its mask in `masks/{id}.png` (gray; transparent counts as white).
 
 ## Decision
 

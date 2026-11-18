@@ -19,10 +19,10 @@
   motion filtering, perspective guides, QuickShape editing and arcs, wet
   mixing, pen tilt, ColorDrop threshold, palette import/export, the guide saved in the file,
   Calligraphy/Abstract/Elements brushes, `.rcbrushes` sets and the brush outline. **Phase 2 is
-  done.** Phase 3 started: selections, Free Transform, Alpha Lock, clipping masks.
+  done.** Phase 3 started: selections, Free Transform, Alpha Lock, clipping masks, layer masks.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 3: layer masks next.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 3: adjustments next (Hue/Saturation, Levels, Curves, Brightness/Contrast, Invert, Desaturate).
 
 ## Phase 0 — Foundation
 
@@ -140,7 +140,8 @@ The Photoshop features people use most, in this order:
 - [x] Free Transform (Ctrl+T): move, scale, rotate and flip the selection or the layer;
       bilinear, one undo step, the selection follows; Esc cancels
 - [x] Alpha Lock and clipping masks (CPU and GPU, merge down respects clipping, saved in the file)
-- [ ] Layer masks
+- [x] Layer masks: add, edit (brush, eraser, fill and gradient paint gray), apply, delete;
+      CPU and GPU, saved as `masks/{id}.png`
 - [ ] Adjustments: Hue/Saturation (Ctrl+U), Levels (Ctrl+L), Curves (Ctrl+M),
       Brightness/Contrast, Invert (Ctrl+I), Desaturate, live preview
 - [ ] Filters: Gaussian blur, Unsharp Mask, Add Noise

@@ -28,6 +28,16 @@ pub fn composite(dst: &mut [u8], src: &[u8], opacity: f32, mode: BlendMode) {
   }
 }
 
+/// A layer's tile with its mask applied (see [`crate::Layer::mask`]): every channel scaled by
+/// the mask's gray, where transparent counts as white.
+pub(crate) fn masked<'a>(tile: &'a [u8], mask: Option<&crate::Layer>, tx: u32, ty: u32) -> std::borrow::Cow<'a, [u8]> {
+  let Some(m) = mask.and_then(|m| m.tile(tx, ty)) else { return std::borrow::Cow::Borrowed(tile) };
+  let show = |p: &[u8; 4]| (p[0] as u32 * 54 + p[1] as u32 * 183 + p[2] as u32 * 19) / 256 + 255 - p[3] as u32;
+  std::borrow::Cow::Owned(
+    tile.as_chunks::<4>().0.iter().zip(m.as_chunks::<4>().0).flat_map(|(p, m)| p.map(|v| (v as u32 * show(m).min(255) / 255) as u8)).collect(),
+  )
+}
+
 /// A clipped layer's tile limited to where `base` has paint: every channel scaled by the base's
 /// alpha (both premultiplied).
 pub(crate) fn clip(tile: &[u8], base: &[u8]) -> Vec<u8> {

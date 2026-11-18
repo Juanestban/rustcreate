@@ -98,6 +98,21 @@ fn gpu_composite_matches_the_cpu_reference() {
   );
   doc.layer_mut(modes.len()).unwrap().clip = false;
 
+  // A layer mask: half of the bottom layer hidden with black, half shown with mid gray.
+  assert!(doc.add_mask(0));
+  let mask = doc.layer_mut(0).unwrap().mask.as_mut().unwrap().tile_mut(0, 0);
+  for x in 0..width as usize {
+    let v = if x < 32 { 0 } else { 128 };
+    for y in 0..height as usize {
+      mask[(y * TILE as usize + x) * 4..][..4].copy_from_slice(&[v, v, v, 255]);
+    }
+  }
+  renderer.sync(&device, &queue, &mut doc);
+  let gpu = read_back(&device, &queue, renderer.composite_texture(), (width, height));
+  let cpu = doc.composite_tile(0, 0).unwrap();
+  assert!(gpu.iter().zip(cpu.chunks(TILE as usize * 4).flat_map(|row| &row[..width as usize * 4])).all(|(g, c)| g.abs_diff(*c) <= 2), "masks match");
+  assert!(doc.remove_mask(0, false));
+
   // Hiding a layer re-composites; painting re-uploads only what changed.
   doc.layer_mut(1).unwrap().hidden = true;
   doc.layer_mut(2).unwrap().tile_mut(0, 0)[TILE as usize * 4..][..4].copy_from_slice(&[0, 0, 0, 0]);

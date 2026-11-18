@@ -320,10 +320,11 @@ impl Document {
   /// Starts a stroke on the active layer, as one undo step. `None` if the layer is locked.
   /// `erase` removes paint with the brush's shape instead of adding `color`.
   pub fn begin_stroke(&mut self, brush: Brush, color: [u8; 3], erase: bool) -> Option<Stroke> {
-    let layer = &self.layers[self.active];
-    if layer.locked {
+    if self.layers[self.active].locked {
       return None;
     }
+    let color = self.paint_color(color);
+    let layer = self.target();
     let (layer_id, alpha_lock) = (layer.id, layer.alpha_lock);
     self.checkpoint();
     Some(Stroke {
@@ -431,7 +432,7 @@ impl Stroke {
         }
       }
     }
-    let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return end };
+    let Some(layer) = doc.find_mut(self.layer_id) else { return end };
     for key in &affected {
       let tile = self.tiles.get_mut(key).expect("affected tiles were stamped");
       tile.coverage.fill(0.0);
@@ -473,7 +474,7 @@ impl Stroke {
   /// Wipes what the stroke painted and paints `path` instead, unsmoothed, at `pressure`
   /// (QuickShape). The stroke stays one undo step and can still be finished.
   pub fn redraw(&mut self, doc: &mut Document, path: &[(f32, f32)], pressure: f32) {
-    if let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) {
+    if let Some(layer) = doc.find_mut(self.layer_id) {
       for (key, tile) in self.tiles.drain() {
         layer.tile_mut(key.0, key.1).copy_from_slice(&tile.before);
       }
@@ -565,7 +566,7 @@ impl Stroke {
   /// The average straight color of the layer around (x, y), weighted by alpha, from before the
   /// stroke; `None` where it is empty.
   fn pick(&self, doc: &Document, x: f32, y: f32, reach: f32) -> Option<[f32; 3]> {
-    let layer = doc.layers.iter().find(|l| l.id == self.layer_id)?;
+    let layer = doc.find(self.layer_id)?;
     let (mut sum, mut weight) = ([0.0f32; 3], 0.0f32);
     for (dx, dy) in [(0.0, 0.0), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0), (0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0)] {
       let (px, py) = (x + dx * reach, y + dy * reach);
@@ -629,7 +630,7 @@ impl Stroke {
     let radius = (self.diameter(d.pressure, d.at) * scale * d.size).max(1.0) / 2.0;
     let Some((x0, y0, x1, y1)) = self.bounds(&d, radius, doc.width, doc.height) else { return };
     let textures = Self::textures(&self.brush);
-    let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
+    let Some(layer) = doc.find_mut(self.layer_id) else { return };
     // A brush running dry thins down to a quarter.
     let flow = self.brush.flow
       * (1.0 - self.brush.pressure_flow * (1.0 - d.pressure))
@@ -703,7 +704,7 @@ impl Stroke {
     let radius = (self.diameter(d.pressure, d.at) * d.size).max(1.0) / 2.0;
     let textures = Self::textures(&self.brush);
     let Some((x0, y0, x1, y1)) = self.bounds(&d, radius, width, height) else { return };
-    let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
+    let Some(layer) = doc.find_mut(self.layer_id) else { return };
     let strength = self.brush.opacity.clamp(0.0, 1.0) * (1.0 - self.brush.pressure_flow * (1.0 - d.pressure));
     let (x, y) = (d.x, d.y);
     // Copy the source patch first: it can overlap the pixels about to change.

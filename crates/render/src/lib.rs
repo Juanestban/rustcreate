@@ -37,8 +37,9 @@ pub struct CanvasRenderer {
   /// Ping-pong targets; `result` indexes the finished composite.
   stack: [(wgpu::Texture, wgpu::TextureView); 2],
   result: usize,
-  /// What the last composite was made from: (id, opacity, hidden, blend, clip) bottom to top.
-  composed: Vec<(u64, u32, bool, BlendMode, bool)>,
+  /// What the last composite was made from: (id, opacity, hidden, blend, clip, mask id) bottom
+  /// to top.
+  composed: Vec<(u64, u32, bool, BlendMode, bool, Option<u64>)>,
   composite_pipeline: wgpu::RenderPipeline,
   composite_layout: wgpu::BindGroupLayout,
   display_pipeline: wgpu::RenderPipeline,
@@ -70,7 +71,7 @@ impl CanvasRenderer {
     };
     let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
       label: Some("composite"),
-      entries: &[texture_entry(0), texture_entry(1), uniform_entry(2, wgpu::ShaderStages::FRAGMENT), texture_entry(3)],
+      entries: &[texture_entry(0), texture_entry(1), uniform_entry(2, wgpu::ShaderStages::FRAGMENT), texture_entry(3), texture_entry(4)],
     });
     let display_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
       label: Some("display"),
@@ -146,11 +147,17 @@ impl CanvasRenderer {
     for layer in doc.layers_mut() {
       let gpu = self.layers.entry(layer.id).or_insert_with(|| layer_texture(device, self.size));
       changed |= upload(queue, gpu, layer, self.size);
+      // A mask is one more texture, keyed by its own id.
+      if let Some(mask) = layer.mask.as_deref_mut() {
+        let gpu = self.layers.entry(mask.id).or_insert_with(|| layer_texture(device, self.size));
+        changed |= upload(queue, gpu, mask, self.size);
+      }
     }
-    let live: Vec<u64> = doc.layers().iter().map(|l| l.id).collect();
+    let live: Vec<u64> = doc.layers().iter().flat_map(|l| [Some(l.id), l.mask.as_ref().map(|m| m.id)]).flatten().collect();
     self.layers.retain(|id, _| live.contains(id));
 
-    let composed: Vec<_> = doc.layers().iter().map(|l| (l.id, l.opacity.to_bits(), l.hidden, l.blend, l.clip)).collect();
+    let composed: Vec<_> =
+      doc.layers().iter().map(|l| (l.id, l.opacity.to_bits(), l.hidden, l.blend, l.clip, l.mask.as_ref().map(|m| m.id))).collect();
     if changed || composed != self.composed {
       self.composite(device, queue, doc.layers());
       self.composed = composed;
@@ -174,6 +181,9 @@ impl CanvasRenderer {
       params[..4].copy_from_slice(&layer.opacity.clamp(0.0, 1.0).to_ne_bytes());
       params[4..8].copy_from_slice(&(layer.blend as u32).to_ne_bytes());
       params[8..12].copy_from_slice(&u32::from(clipped).to_ne_bytes());
+      params[12..16].copy_from_slice(&u32::from(layer.mask.is_some()).to_ne_bytes());
+      // Without a mask the binding still needs a texture; the shader does not read it.
+      let mask = &self.layers[&layer.mask.as_ref().map_or(layer.id, |m| m.id)].view;
       queue.write_buffer(&gpu.params, 0, &params);
       let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
@@ -183,6 +193,7 @@ impl CanvasRenderer {
           wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gpu.view) },
           wgpu::BindGroupEntry { binding: 2, resource: gpu.params.as_entire_binding() },
           wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&self.layers[&base_id].view) },
+          wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(mask) },
         ],
       });
       target = 1 - target;

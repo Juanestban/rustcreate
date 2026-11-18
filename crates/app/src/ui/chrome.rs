@@ -518,7 +518,10 @@ impl App {
         let (id, hidden, locked) = (layer.id, layer.hidden, layer.locked);
         // A clipped layer is marked with an arrow into the layer below.
         let name = layer.name.clone();
-        let shown = if layer.clip && index > 0 { format!("↳ {name}") } else { name.clone() };
+        let mut shown = if layer.clip && index > 0 { format!("↳ {name}") } else { name.clone() };
+        if layer.mask.is_some() {
+          shown.push_str(" ◐");
+        }
         let active = index == self.doc.active();
         let row = Frame::NONE
           .fill(if active { palette.selected } else { palette.control })
@@ -609,6 +612,25 @@ impl App {
       let layer = self.doc.layer_mut(index).expect("layer");
       (layer.alpha_lock, layer.clip) = (alpha_lock, clip);
     }
+    // The layer mask: black hides, white shows; painting goes to it while "Edit mask" is on.
+    ui.horizontal(|ui| {
+      if self.doc.layers()[index].mask.is_none() {
+        if ui.button(self.i18n.tr("ui-mask-add")).on_hover_text(self.i18n.tr("ui-mask-help")).clicked() {
+          self.doc.add_mask(index);
+        }
+      } else {
+        let mut editing = self.doc.editing_mask();
+        if ui.checkbox(&mut editing, self.i18n.tr("ui-mask-edit")).on_hover_text(self.i18n.tr("ui-mask-help")).changed() {
+          self.doc.set_editing_mask(editing);
+        }
+        if ui.button(self.i18n.tr("ui-mask-apply")).clicked() {
+          self.doc.remove_mask(index, true);
+        }
+        if ui.button(self.i18n.tr("ui-mask-delete")).clicked() {
+          self.doc.remove_mask(index, false);
+        }
+      }
+    });
     ui.horizontal(|ui| {
       if icons::button(ui, Icon::Duplicate, false, true, &self.i18n.tr("ui-layer-duplicate")).clicked() {
         self.doc.duplicate_layer(index);
