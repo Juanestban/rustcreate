@@ -195,3 +195,5 @@ ui-guide-points = { $count ->
 }
 ui-guide-edit = Editar guía
 ui-guide-edit-help = Mientras está activo, arrastra los puntos de la guía en el lienzo (los puntos de fuga o el centro); no se pinta.
+ui-studio-wet-mix = Mezcla húmeda
+ui-studio-charge = Carga de pintura

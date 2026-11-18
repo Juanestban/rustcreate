@@ -91,6 +91,8 @@ fn builtins() -> Vec<Entry> {
       "flat-brush",
       2,
       Brush {
+        wet_mix: 0.3,
+        charge: 0.9,
         size: 40.0,
         tip: Tip::Square,
         hardness: 0.7,
@@ -106,9 +108,24 @@ fn builtins() -> Vec<Entry> {
     (
       "round-bristle",
       2,
-      Brush { size: 36.0, tip: Tip::Bristles, follow: true, spacing: 0.04, flow: 0.8, pressure_size: 0.4, pressure_flow: 0.6, ..flat },
+      Brush {
+        wet_mix: 0.5,
+        charge: 0.8,
+        size: 36.0,
+        tip: Tip::Bristles,
+        follow: true,
+        spacing: 0.04,
+        flow: 0.8,
+        pressure_size: 0.4,
+        pressure_flow: 0.6,
+        ..flat
+      },
     ),
-    ("gouache", 2, Brush { size: 30.0, hardness: 0.75, flow: 0.85, pressure_flow: 0.4, grain: Grain::Canvas, grain_depth: 0.3, ..flat }),
+    (
+      "gouache",
+      2,
+      Brush { wet_mix: 0.35, size: 30.0, hardness: 0.75, flow: 0.85, pressure_flow: 0.4, grain: Grain::Canvas, grain_depth: 0.3, ..flat },
+    ),
     (
       "dabbing-brush",
       2,

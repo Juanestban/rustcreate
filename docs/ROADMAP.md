@@ -16,11 +16,11 @@
   Brush Studio, the brush library with saved brushes and a brush per tool, the paint bucket and the
   gradient, QuickShape, the color disc with harmonies and palettes, drawing guides with symmetry,
   brush import from `.brushset` and `.abr`, ColorDrop and the eyedropper loupe,
-  motion filtering, perspective guides, QuickShape editing and arcs.
+  motion filtering, perspective guides, QuickShape editing and arcs, wet
+  mixing.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: wet mixing; pen
-  tilt.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: pen tilt.
 
 ## Phase 0 — Foundation
 
@@ -82,7 +82,9 @@
       canvas, noise), all original (ADR 0006); rotation, follow-the-stroke, scatter, size jitter
 - [ ] Pen tilt in the brush dynamics
 - [x] Smudge tool (`S`): patch smudging with the brush's shape and opacity, pressure-aware
-- [ ] Wet mixing (paint brushes that pick up and blend canvas color)
+- [x] Wet mixing per brush: picks up the layer's color under the brush and carries it along;
+      paint charge runs the brush dry (thinner, more picked-up color); Flat Brush, Round Bristle
+      and Gouache use it
 - [x] Stabilization: StreamLine plus a pulled-string stabilizer; strokes catch up with the
       pointer when they end; per-brush settings in the brushes panel
 - [x] Motion filtering per brush: adaptive smoothing (after the 1€ filter) that removes slow

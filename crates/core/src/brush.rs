@@ -46,6 +46,12 @@ pub struct Brush {
   /// Motion filtering 0..=1: removes jitter from slow, shaky movement without slowing fast
   /// strokes down (adaptive smoothing, after the 1€ filter).
   pub motion_filter: f32,
+  /// Wet mixing 0..=1: how much of the color already on the layer the brush picks up and
+  /// blends into its own as it moves. 0 = paints only its color.
+  pub wet_mix: f32,
+  /// Paint load 0..=1: how long the brush lasts before it runs dry (thinner, then more of the
+  /// picked-up color). 1 = never runs out.
+  pub charge: f32,
   /// The dab's shape.
   pub tip: Tip,
   /// Tip rotation in degrees.
@@ -87,6 +93,8 @@ impl Brush {
       taper_end: 0.0,
       streamline: 0.1,
       motion_filter: 0.0,
+      wet_mix: 0.0,
+      charge: 1.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -114,6 +122,8 @@ impl Brush {
       taper_end: 40.0,
       streamline: 0.4,
       motion_filter: 0.0,
+      wet_mix: 0.0,
+      charge: 1.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -141,6 +151,8 @@ impl Brush {
       taper_end: 0.0,
       streamline: 0.0,
       motion_filter: 0.0,
+      wet_mix: 0.0,
+      charge: 1.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -167,6 +179,10 @@ struct Dab {
   angle: f32,
   /// Size multiplier from the size jitter.
   size: f32,
+  /// Straight sRGB this dab paints with: the brush color, or a wet mix with the canvas.
+  color: [f32; 3],
+  /// Paint left in the brush, 0..=1: thins the dab as it runs dry.
+  load: f32,
 }
 
 type Textures = (Option<&'static [f32]>, Option<&'static [f32]>);
@@ -202,6 +218,8 @@ impl MotionFilter {
 struct StrokeTile {
   before: Vec<u8>,
   coverage: Vec<f32>,
+  /// Wet mixing: the stroke's own color per pixel, since each dab may carry a different one.
+  paint: Vec<[f32; 3]>,
 }
 
 pub struct Stroke {
@@ -230,6 +248,9 @@ pub struct Stroke {
   direction: f32,
   /// Dabs placed so far, the seed of each dab's jitter.
   placed: u32,
+  /// Wet mixing: the color the brush carries, and the paint left in it.
+  carried: Option<[f32; 3]>,
+  load: f32,
   /// Raw pointer samples, for QuickShape.
   points: Vec<(f32, f32)>,
   /// Symmetry: every dab is also stamped through each of these.
@@ -262,6 +283,8 @@ impl Document {
       pulled: None,
       direction: 0.0,
       placed: 0,
+      carried: None,
+      load: 1.0,
       points: Vec::new(),
       mirrors: Vec::new(),
       motion: MotionFilter::default(),
@@ -432,7 +455,9 @@ impl Stroke {
     let (r, a) = (b.scatter * diameter * random(0).abs().sqrt(), random(1) * std::f32::consts::PI);
     let angle = b.angle.to_radians() + if b.follow { self.direction } else { 0.0 } + random(2) * b.angle_jitter * std::f32::consts::PI;
     let size = 1.0 - b.size_jitter.clamp(0.0, 1.0) * (random(3) * 0.5 + 0.5);
-    let dab = Dab { x: x + r * a.cos(), y: y + r * a.sin(), pressure, at: self.travelled, angle, size };
+    let (x, y) = (x + r * a.cos(), y + r * a.sin());
+    let (color, load) = self.wet(doc, x, y, diameter / 2.0);
+    let dab = Dab { x, y, pressure, at: self.travelled, angle, size, color, load };
     if self.smudge {
       return self.smudge_dab(doc, dab);
     }
@@ -440,6 +465,58 @@ impl Stroke {
     for copy in self.copies(dab) {
       self.stamp(doc, copy, 1.0, None);
     }
+  }
+
+  /// Wet mixing and charge: the color this dab paints with and the paint left. The brush picks
+  /// up the layer's color under it (as it was before the stroke) and carries it along.
+  fn wet(&mut self, doc: &Document, x: f32, y: f32, radius: f32) -> ([f32; 3], f32) {
+    let own = self.color.map(|c| c as f32);
+    let b = self.brush;
+    if self.erase || self.smudge || (b.wet_mix <= 0.0 && b.charge >= 1.0) {
+      return (own, 1.0);
+    }
+    self.load = (self.load - (1.0 - b.charge.clamp(0.0, 1.0)) * 0.03).max(0.0);
+    let wet = b.wet_mix.clamp(0.0, 1.0);
+    if wet <= 0.0 {
+      return (own, self.load);
+    }
+    if let Some(picked) = self.pick(doc, x, y, radius * 0.5) {
+      let carried = self.carried.unwrap_or(own);
+      self.carried = Some(std::array::from_fn(|ch| carried[ch] + (picked[ch] - carried[ch]) * wet * 0.5));
+    }
+    let carried = self.carried.unwrap_or(own);
+    // Fresh paint shows more of the brush color; a dry brush shows what it picked up.
+    let mix = wet * (1.0 - 0.5 * self.load);
+    (std::array::from_fn(|ch| own[ch] + (carried[ch] - own[ch]) * mix), self.load)
+  }
+
+  /// The average straight color of the layer around (x, y), weighted by alpha, from before the
+  /// stroke; `None` where it is empty.
+  fn pick(&self, doc: &Document, x: f32, y: f32, reach: f32) -> Option<[f32; 3]> {
+    let layer = doc.layers.iter().find(|l| l.id == self.layer_id)?;
+    let (mut sum, mut weight) = ([0.0f32; 3], 0.0f32);
+    for (dx, dy) in [(0.0, 0.0), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0), (0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0)] {
+      let (px, py) = (x + dx * reach, y + dy * reach);
+      if px < 0.0 || py < 0.0 || px >= doc.width as f32 || py >= doc.height as f32 {
+        continue;
+      }
+      let (px, py) = (px as u32, py as u32);
+      let key = (px / TILE, py / TILE);
+      let tile = match self.tiles.get(&key) {
+        Some(stroke) => &stroke.before[..],
+        None => match layer.tile(key.0, key.1) {
+          Some(pixels) => pixels,
+          None => continue,
+        },
+      };
+      let p = (((py % TILE) * TILE + px % TILE) * 4) as usize;
+      // Premultiplied, so summing the color channels already weights them by alpha.
+      for ch in 0..3 {
+        sum[ch] += tile[p + ch] as f32;
+      }
+      weight += tile[p + 3] as f32;
+    }
+    (weight > 0.0).then(|| sum.map(|v| v / weight * 255.0))
   }
 
   /// The dab and its symmetric copies.
@@ -481,15 +558,21 @@ impl Stroke {
     let Some((x0, y0, x1, y1)) = self.bounds(&d, radius, doc.width, doc.height) else { return };
     let textures = Self::textures(&self.brush);
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
-    let flow = self.brush.flow * (1.0 - self.brush.pressure_flow * (1.0 - d.pressure));
+    // A brush running dry thins down to a quarter.
+    let flow = self.brush.flow * (1.0 - self.brush.pressure_flow * (1.0 - d.pressure)) * (0.25 + 0.75 * d.load);
     let opacity = self.brush.opacity.clamp(0.0, 1.0);
+    let wet = self.brush.wet_mix > 0.0 && !self.erase;
     for ty in y0 / TILE..=y1 / TILE {
       for tx in x0 / TILE..=x1 / TILE {
         if only.is_some_and(|only| !only.contains(&(tx, ty))) {
           continue;
         }
         let pixels = layer.tile_mut(tx, ty);
-        let tile = self.tiles.entry((tx, ty)).or_insert_with(|| StrokeTile { before: pixels.to_vec(), coverage: vec![0.0; (TILE * TILE) as usize] });
+        let tile = self.tiles.entry((tx, ty)).or_insert_with(|| StrokeTile {
+          before: pixels.to_vec(),
+          coverage: vec![0.0; (TILE * TILE) as usize],
+          paint: if wet { vec![[0.0; 3]; (TILE * TILE) as usize] } else { Vec::new() },
+        });
         for py in y0.max(ty * TILE)..=y1.min(ty * TILE + TILE - 1) {
           for px in x0.max(tx * TILE)..=x1.min(tx * TILE + TILE - 1) {
             let falloff = Self::shape(&self.brush, textures, &d, radius, px, py);
@@ -499,8 +582,18 @@ impl Stroke {
             let i = ((py - ty * TILE) * TILE + (px - tx * TILE)) as usize;
             let dab = falloff * flow;
             let c = &mut tile.coverage[i];
+            let previous = *c;
             *c = if self.brush.buildup { *c + (1.0 - *c) * dab } else { c.max(dab) };
             let alpha = *c * opacity;
+            // Wet: each dab tints the stroke's color by its share of the coverage.
+            let color = if wet {
+              let paint = &mut tile.paint[i];
+              let share = if previous <= 0.0 { 1.0 } else { dab / (previous + dab) };
+              *paint = std::array::from_fn(|ch| paint[ch] + (d.color[ch] - paint[ch]) * share);
+              *paint
+            } else {
+              d.color
+            };
             let p = i * 4;
             let before = &tile.before[p..p + 4];
             let out = &mut pixels[p..p + 4];
@@ -510,7 +603,7 @@ impl Stroke {
               }
             } else {
               for ch in 0..3 {
-                out[ch] = (self.color[ch] as f32 * alpha + before[ch] as f32 * (1.0 - alpha)).round() as u8;
+                out[ch] = (color[ch] * alpha + before[ch] as f32 * (1.0 - alpha)).round() as u8;
               }
               out[3] = (255.0 * alpha + before[3] as f32 * (1.0 - alpha)).round() as u8;
             }
@@ -600,6 +693,8 @@ mod tests {
       taper_end: 0.0,
       streamline: 0.0,
       motion_filter: 0.0,
+      wet_mix: 0.0,
+      charge: 1.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -816,6 +911,42 @@ mod tests {
     let mut off = MotionFilter::default();
     off.apply((0.0, 0.0), 0.0);
     assert_eq!(off.apply((5.0, 3.0), 0.0), (5.0, 3.0), "0 = off");
+  }
+
+  fn rgb(doc: &Document, x: u32, y: u32) -> [u8; 4] {
+    let t = doc.layers()[0].tile(x / TILE, y / TILE).unwrap();
+    let p = (((y % TILE) * TILE + x % TILE) * 4) as usize;
+    t[p..p + 4].try_into().unwrap()
+  }
+
+  #[test]
+  fn wet_brushes_pick_up_color_and_run_dry() {
+    let mut doc = Document::new(400, 100);
+    let red = flat(30.0, 1.0);
+    let mut stroke = doc.begin_stroke(red, [255, 0, 0], false).unwrap();
+    stroke.line(&mut doc, (20.0, 50.0), (150.0, 50.0), 1.0);
+    stroke.finish(&mut doc);
+
+    // A wet blue stroke out of the red: it drags red along into the empty part.
+    let wet = Brush { wet_mix: 0.8, ..red };
+    let mut stroke = doc.begin_stroke(wet, [0, 0, 255], false).unwrap();
+    for i in 0..=60 {
+      stroke.add(&mut doc, 100.0 + i as f32 * 4.0, 50.0, 1.0);
+    }
+    stroke.finish(&mut doc);
+    let [r, _, b, _] = rgb(&doc, 200, 50);
+    assert!(r > 60 && b > 60, "mixed purple past the red: {r} {b}");
+    let [r, _, b, _] = rgb(&doc, 330, 50);
+    assert!(r > 20 && b > r / 2, "still carrying some red: {r} {b}");
+
+    // A dry brush (no charge) fades along the stroke.
+    let mut doc = Document::new(400, 100);
+    let mut stroke = doc.begin_stroke(Brush { charge: 0.0, ..flat(20.0, 1.0) }, [0, 0, 0], false).unwrap();
+    for i in 0..=80 {
+      stroke.add(&mut doc, 10.0 + i as f32 * 4.5, 50.0, 1.0);
+    }
+    stroke.finish(&mut doc);
+    assert!(rgb(&doc, 20, 50)[3] > 200 && rgb(&doc, 360, 50)[3] < 120, "{} → {}", rgb(&doc, 20, 50)[3], rgb(&doc, 360, 50)[3]);
   }
 
   #[test]
