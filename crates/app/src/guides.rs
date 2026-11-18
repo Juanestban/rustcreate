@@ -7,7 +7,8 @@ use std::f32::consts::{FRAC_PI_2, PI};
 use eframe::egui::{Color32, Painter, Pos2, Stroke, Vec2, pos2};
 use rustcreate_core::Symmetry;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Kind {
   #[default]
   Off,
@@ -17,8 +18,7 @@ pub enum Kind {
   Symmetry,
 }
 
-/// shortcut: the guide belongs to the session, not the file; save it in `.rcreate` when files
-/// grow per-canvas settings.
+/// Saved in the `.rcreate` file with `to_json`, restored with `from_json`.
 pub struct Guides {
   pub kind: Kind,
   /// Grid spacing in canvas pixels.
@@ -46,6 +46,55 @@ impl Default for Guides {
       editing: false,
       center: pos2(0.5, 0.5),
       vanishing: [pos2(0.5, 0.4), pos2(1.1, 0.4), pos2(0.5, 1.6)],
+    }
+  }
+}
+
+/// The guide as stored in `document.json`.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Saved {
+  kind: Kind,
+  spacing: f32,
+  symmetry: Symmetry,
+  points: usize,
+  assist: bool,
+  center: [f32; 2],
+  vanishing: [[f32; 2]; 3],
+}
+
+impl Guides {
+  pub fn to_json(&self) -> serde_json::Value {
+    let saved = Saved {
+      kind: self.kind,
+      spacing: self.spacing,
+      symmetry: self.symmetry,
+      points: self.points,
+      assist: self.assist,
+      center: [self.center.x, self.center.y],
+      vanishing: self.vanishing.map(|p| [p.x, p.y]),
+    };
+    serde_json::to_value(saved).expect("guide serializes")
+  }
+
+  /// The guide saved in a file, or no guide. Values out of range (an edited or damaged file)
+  /// are brought back in.
+  pub fn from_json(value: Option<&serde_json::Value>) -> Self {
+    let Some(saved) = value.and_then(|v| <Saved as serde::Deserialize>::deserialize(v).ok()) else { return Self::default() };
+    let point =
+      |[x, y]: [f32; 2], fallback: Pos2| if x.is_finite() && y.is_finite() { pos2(x.clamp(-10.0, 10.0), y.clamp(-10.0, 10.0)) } else { fallback };
+    let default = Self::default();
+    Self {
+      kind: saved.kind,
+      spacing: if saved.spacing.is_finite() { saved.spacing.clamp(10.0, 1000.0) } else { default.spacing },
+      symmetry: match saved.symmetry {
+        Symmetry::Radial(n) => Symmetry::Radial(n.clamp(2, 16)),
+        other => other,
+      },
+      points: saved.points.clamp(1, 3),
+      assist: saved.assist,
+      editing: false,
+      center: point(saved.center, default.center),
+      vanishing: std::array::from_fn(|i| point(saved.vanishing[i], default.vanishing[i])),
     }
   }
 }
@@ -220,6 +269,20 @@ mod tests {
   use super::*;
 
   const SIZE: Vec2 = Vec2::new(1000.0, 1000.0);
+
+  #[test]
+  fn guide_survives_json_and_rejects_bad_values() {
+    let mut guide = Guides { kind: Kind::Perspective, points: 2, spacing: 64.0, ..Guides::default() };
+    guide.move_handle(1, pos2(900.0, 200.0), SIZE);
+    let back = Guides::from_json(Some(&guide.to_json()));
+    assert_eq!((back.kind, back.points, back.spacing, back.vanishing), (guide.kind, 2, 64.0, guide.vanishing));
+    let bad = serde_json::json!({ "kind": "grid", "spacing": 1e9, "symmetry": { "radial": 200 }, "points": 9, "assist": true,
+      "center": [f32::MAX, 0.5], "vanishing": [[0.5, 0.4], [1.1, 0.4], [0.5, 1.6]] });
+    let back = Guides::from_json(Some(&bad));
+    assert_eq!((back.kind, back.spacing, back.points, back.symmetry), (Kind::Grid, 1000.0, 3, Symmetry::Radial(16)));
+    assert_eq!(Guides::from_json(Some(&serde_json::json!("nonsense"))).kind, Kind::Off);
+    assert_eq!(Guides::from_json(None).kind, Kind::Off);
+  }
 
   #[test]
   fn assist_locks_to_the_nearest_grid_direction() {

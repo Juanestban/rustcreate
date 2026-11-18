@@ -115,6 +115,9 @@ pub struct Document {
   /// Bumped by every undoable change, undo and redo: compare with the value at save time to
   /// know whether there are unsaved changes.
   revision: u64,
+  /// The app's drawing guide for this canvas, saved in the file as is. Core does not read it;
+  /// changing it is not an undoable edit.
+  pub guide: Option<serde_json::Value>,
 }
 
 impl Document {
@@ -124,8 +127,16 @@ impl Document {
   }
 
   pub fn with_history(width: u32, height: u32, history: History) -> Self {
-    let mut doc =
-      Self { width: width.clamp(1, MAX_SIDE), height: height.clamp(1, MAX_SIDE), layers: Vec::new(), active: 0, next_id: 1, history, revision: 0 };
+    let mut doc = Self {
+      width: width.clamp(1, MAX_SIDE),
+      height: height.clamp(1, MAX_SIDE),
+      layers: Vec::new(),
+      active: 0,
+      next_id: 1,
+      history,
+      revision: 0,
+      guide: None,
+    };
     let first = doc.new_layer();
     doc.layers.push(first);
     doc

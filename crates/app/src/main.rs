@@ -212,6 +212,8 @@ impl App {
     self.path = path;
     self.renaming = None;
     self.canvas.reset(&self.render_state, &self.doc);
+    // The guide belongs to the canvas: the file's, or none for a new one.
+    self.canvas.tools.guides = guides::Guides::from_json(self.doc.guide.as_ref());
   }
 
   /// Saves to the current file, or asks where. Returns whether it saved.
@@ -224,6 +226,7 @@ impl App {
         path
       }
     };
+    self.doc.guide = Some(self.canvas.tools.guides.to_json());
     match self.doc.save(&path) {
       Ok(()) => {
         self.saved = self.doc.revision();

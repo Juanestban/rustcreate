@@ -51,6 +51,9 @@ struct Manifest {
   active: usize,
   /// Bottom to top.
   layers: Vec<LayerInfo>,
+  /// The drawing guide (`Document::guide`); older files have none.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  guide: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -91,6 +94,7 @@ impl Document {
         .iter()
         .map(|l| LayerInfo { id: l.id, name: l.name.clone(), opacity: l.opacity, hidden: l.hidden, locked: l.locked, blend: l.blend })
         .collect(),
+      guide: self.guide.clone(),
     };
     zip.start_file("document.json", stored)?;
     serde_json::to_writer_pretty(&mut zip, &manifest)?;
@@ -128,6 +132,7 @@ impl Document {
     }
 
     let mut doc = Document::with_history(manifest.width, manifest.height, History::default());
+    doc.guide = manifest.guide;
     doc.layers.clear();
     for info in manifest.layers {
       if doc.layers.iter().any(|l| l.id == info.id) {
@@ -339,11 +344,13 @@ mod tests {
   fn save_and_open_round_trip() {
     let dir = temp_dir("roundtrip");
     let path = dir.join("art.rcreate");
-    let doc = sample();
+    let mut doc = sample();
+    doc.guide = Some(serde_json::json!({ "kind": "grid", "spacing": 50.0 }));
     doc.save(&path).unwrap();
     assert!(!dir.join("art.rcreate.tmp").exists(), "temporary file renamed away");
 
     let opened = Document::open(&path).unwrap();
+    assert_eq!(opened.guide, doc.guide, "the guide comes back as saved");
     assert_eq!((opened.width, opened.height, opened.active()), (300, 260, 1));
     let top = &opened.layers()[1];
     assert_eq!((top.name.as_str(), top.opacity, top.blend, top.locked), ("Ink", 0.5, BlendMode::Multiply, true));

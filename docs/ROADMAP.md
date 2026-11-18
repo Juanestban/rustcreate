@@ -21,7 +21,7 @@
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
 - **Next:** v0.1.0 still waits on a Windows test with a pen. Then: the rest of Phase 2 (more brush
-  categories, brush set export, guide in the file) or
+  categories, brush set export) or
   Phase 3.
 
 ## Phase 0 — Foundation
@@ -115,7 +115,8 @@
 - [x] Perspective guides with 1, 2 or 3 vanishing points: assisted strokes head for the nearest
       vanishing point (or stay horizontal/vertical where the perspective keeps them); "Edit
       guide" drags the vanishing points or the grid/symmetry center
-- [ ] Guide saved in the file
+- [x] Guide saved in the file: `document.json` keeps it per canvas (optional field, same
+      format version); a new canvas starts without one
 - [x] Import brushes the user owns: Procreate `.brushset`/`.brush` (shape and grain images)
       and Photoshop `.abr` v6+ (sampled tips, raw or PackBits) into My brushes; imported images
       kept in `brush-images/` next to the settings
