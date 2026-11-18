@@ -21,7 +21,7 @@
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
 - **Next:** v0.1.0 still waits on a Windows test with a pen. Then: the rest of Phase 2 (more brush
-  categories, brush and palette import/export, ColorDrop threshold drag, guide in the file) or
+  categories, brush and palette import/export, guide in the file) or
   Phase 3.
 
 ## Phase 0 — Foundation
@@ -101,7 +101,8 @@
       dithered, live while dragging); Alt+Backspace fills the layer
 - [x] ColorDrop: drag the color button onto the canvas to fill there (bucket threshold and
       sampling)
-- [ ] ColorDrop threshold adjusted by dragging after the drop
+- [x] ColorDrop threshold: hold still over the canvas to fill, slide sideways to change the
+      threshold live (one undo step); the threshold is kept for the bucket
 - [x] Color panel: own hue ring with saturation/brightness square, classic picker, harmony
       modes (complementary, split, analogous, triadic, tetradic), hex field, palettes saved to
       `palettes.json` (new, rename, delete, add/remove colors)

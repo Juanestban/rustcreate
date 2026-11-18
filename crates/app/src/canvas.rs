@@ -102,6 +102,9 @@ pub struct Canvas {
   shape_handle: Option<usize>,
   /// Shift on the previous frame, to make the shape perfect once per press.
   shift: bool,
+  /// ColorDrop held still over the canvas: where it filled (canvas pixels), the pointer's x then
+  /// (sliding sideways changes the threshold) and the threshold of the fill on screen.
+  drop: Option<(Pos2, f32, f32)>,
 }
 
 /// A ring by the pointer: the color under it on top, the one before picking below.
@@ -142,6 +145,7 @@ impl Canvas {
       shape_edit: false,
       shape_handle: None,
       shift: false,
+      drop: None,
     }
   }
 
@@ -183,6 +187,10 @@ impl Canvas {
     self.tools.guides.draw(&ui.painter_at(rect), canvas, crate::ui::theme::ACCENT.gamma_multiply(0.75), to_screen);
     if let Some((at, before)) = self.loupe {
       loupe(ui.painter(), at, self.tools.primary, before);
+    }
+    if let (Some((_, _, threshold)), Some(at)) = (self.drop, ui.input(|i| i.pointer.interact_pos())) {
+      let text = format!("{:.0} %", threshold * 100.0);
+      ui.painter().text(at + vec2(0.0, -28.0), egui::Align2::CENTER_BOTTOM, text, egui::FontId::proportional(15.0), egui::Color32::WHITE);
     }
     if self.shape_edit
       && let Some((shape, _)) = &self.shape
@@ -313,17 +321,55 @@ impl Canvas {
       return;
     }
     self.loupe = None;
-    // ColorDrop: a color dropped from the color button fills like the bucket.
-    if let Some(drop) = response.dnd_release_payload::<ColorDrop>()
-      && let Some(p) = ui.input(|i| i.pointer.interact_pos()).map(&to_canvas)
-      && p.x >= 0.0
-      && p.y >= 0.0
-      && doc.fill(p.x as u32, p.y as u32, drop.0, self.tools.fill_threshold, self.tools.fill_all_layers)
-    {
-      self.tools.primary = drop.0;
-      self.tools.used_color();
+    // ColorDrop: a color dropped from the color button fills like the bucket. Held still over
+    // the canvas it fills right away, and sliding sideways redoes the fill with a higher or lower
+    // threshold (one undo step); releasing keeps it.
+    if let Some(drop) = response.dnd_release_payload::<ColorDrop>() {
+      let filled = match self.drop.take() {
+        Some((_, _, threshold)) => {
+          self.tools.fill_threshold = threshold;
+          true
+        }
+        None => ui.input(|i| i.pointer.interact_pos()).map(&to_canvas).is_some_and(|p| {
+          p.x >= 0.0 && p.y >= 0.0 && doc.fill(p.x as u32, p.y as u32, drop.0, self.tools.fill_threshold, self.tools.fill_all_layers)
+        }),
+      };
+      if filled {
+        self.tools.primary = drop.0;
+        self.tools.used_color();
+      }
       return;
     }
+    if let Some(drop) = response.dnd_hover_payload::<ColorDrop>()
+      && let Some(screen) = ui.input(|i| i.pointer.interact_pos())
+    {
+      let all_layers = self.tools.fill_all_layers;
+      match &mut self.drop {
+        Some((at, start_x, threshold)) => {
+          let wanted = (self.tools.fill_threshold + (screen.x - *start_x) / 400.0).clamp(0.0, 1.0);
+          if (wanted - *threshold).abs() >= 0.01 && doc.undo() {
+            *threshold = wanted;
+            doc.fill(at.x as u32, at.y as u32, drop.0, wanted, all_layers);
+          }
+        }
+        None => {
+          let now = ui.input(|i| i.time);
+          let at = to_canvas(screen);
+          if screen.distance(self.hold.1) > HOLD_SLOP {
+            self.hold = (now, screen);
+          } else if now - self.hold.0 >= HOLD_SECONDS {
+            self.hold.0 = now;
+            if at.x >= 0.0 && at.y >= 0.0 && doc.fill(at.x as u32, at.y as u32, drop.0, self.tools.fill_threshold, all_layers) {
+              self.drop = Some((at, screen.x, self.tools.fill_threshold));
+            }
+          }
+          ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        }
+      }
+      return;
+    }
+    // The drag left the canvas or ended elsewhere: the fill stays as it is.
+    self.drop = None;
     if matches!(self.tools.tool, Tool::Fill | Tool::Gradient) && !pen.eraser {
       if !view_drag || self.gradient.is_some() {
         self.fill_or_gradient(ui, response, &to_canvas, doc, pressed, released);
