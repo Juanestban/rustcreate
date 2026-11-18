@@ -8,6 +8,7 @@ mod guide;
 mod history;
 mod import;
 mod shape;
+mod swatches;
 pub mod tip;
 
 use std::collections::{HashMap, HashSet};
@@ -21,6 +22,7 @@ pub use history::History;
 use history::Snapshot;
 pub use import::{BrushImage, Imported, import_abr, import_brushset, load_brush_image};
 pub use shape::Shape;
+pub use swatches::{SwatchFormat, Swatches, export_swatches, import_swatches};
 pub use tip::{Grain, Tip};
 
 /// Tile side in pixels.

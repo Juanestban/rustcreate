@@ -21,7 +21,7 @@
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
 - **Next:** v0.1.0 still waits on a Windows test with a pen. Then: the rest of Phase 2 (more brush
-  categories, brush and palette import/export, guide in the file) or
+  categories, brush set export, guide in the file) or
   Phase 3.
 
 ## Phase 0 — Foundation
@@ -107,7 +107,8 @@
       modes (complementary, split, analogous, triadic, tetradic), hex field, palettes saved to
       `palettes.json` (new, rename, delete, add/remove colors)
 - [x] Eyedropper loupe: a ring by the pointer, the picked color over the previous one
-- [ ] Palette import/export (.swatches, .aco, .ase)
+- [x] Palette import/export: Procreate `.swatches`, Photoshop `.aco` (v1/v2) and Adobe `.ase`
+      (one palette per group); CMYK and Lab convert without a profile until color management
 - [x] Drawing guides: 2D grid and isometric with Drawing Assist (strokes keep to the grid's
       directions); symmetry (vertical, horizontal, quadrant, radial 2–16) painted by the engine
       in the same stroke, one undo step

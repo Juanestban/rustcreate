@@ -7,6 +7,8 @@ use eframe::egui::{self, Color32, Mesh, Pos2, RichText, Sense, Shape, Stroke, Ve
 
 use super::theme;
 use crate::App;
+use rustcreate_core::{SwatchFormat, Swatches, export_swatches, import_swatches};
+
 use crate::palettes::Palette;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -278,7 +280,59 @@ impl App {
       palette.colors.remove(i);
     }
     ui.label(RichText::new(self.i18n.tr("ui-palette-remove-help")).small().color(theme::palette(ui).muted));
+    ui.horizontal(|ui| {
+      if ui.button(self.i18n.tr("ui-palette-import")).on_hover_text(self.i18n.tr("ui-palette-import-help")).clicked() {
+        self.import_palettes();
+      }
+      if ui.button(self.i18n.tr("ui-palette-export")).clicked() {
+        self.export_palette();
+      }
+    });
     picked
+  }
+
+  /// Adds the palettes of a `.swatches`, `.aco` or `.ase` file and shows the first one.
+  fn import_palettes(&mut self) {
+    let Some(path) = rfd::FileDialog::new().add_filter(self.i18n.tr("ui-palette-filter"), &["swatches", "aco", "ase"]).pick_file() else { return };
+    let name = path.file_stem().map_or_else(|| self.i18n.tr("ui-palette-new-name"), |s| s.to_string_lossy().into_owned());
+    let result = std::fs::read(&path).map_err(rustcreate_core::FileError::from).and_then(|bytes| {
+      let format = path
+        .extension()
+        .and_then(|e| SwatchFormat::from_extension(&e.to_string_lossy()))
+        .ok_or_else(|| rustcreate_core::FileError::Invalid("unknown palette format".into()))?;
+      import_swatches(&bytes, format, &name)
+    });
+    match result {
+      Ok(imported) => {
+        self.palette = self.palettes.list.len();
+        self.palettes.list.extend(imported.into_iter().map(|s| Palette { name: s.name, colors: s.colors }));
+      }
+      Err(error) => self.error = Some(self.i18n.tr_args("ui-palette-import-failed", &[("error", error.to_string().into())])),
+    }
+  }
+
+  /// Saves the shown palette as `.swatches`, `.aco` or `.ase`, by the extension picked.
+  fn export_palette(&mut self) {
+    let palette = &self.palettes.list[self.palette];
+    let Some(path) = rfd::FileDialog::new()
+      .add_filter("Procreate", &["swatches"])
+      .add_filter("Photoshop", &["aco"])
+      .add_filter("Adobe Swatch Exchange", &["ase"])
+      .set_file_name(format!("{}.swatches", palette.name))
+      .save_file()
+    else {
+      return;
+    };
+    let format = path.extension().and_then(|e| SwatchFormat::from_extension(&e.to_string_lossy())).unwrap_or(SwatchFormat::Procreate);
+    let path = if path.extension().is_some_and(|e| SwatchFormat::from_extension(&e.to_string_lossy()).is_some()) {
+      path
+    } else {
+      path.with_extension("swatches")
+    };
+    let swatches = Swatches { name: palette.name.clone(), colors: palette.colors.clone() };
+    if let Err(error) = export_swatches(&swatches, format).and_then(|bytes| Ok(std::fs::write(&path, bytes)?)) {
+      self.error = Some(self.i18n.tr_args("ui-palette-export-failed", &[("error", error.to_string().into())]));
+    }
   }
 }
 

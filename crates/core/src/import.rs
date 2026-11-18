@@ -215,27 +215,27 @@ fn unpack(mut src: &[u8], row: usize, out: &mut Vec<u8>) -> Result<(), FileError
 }
 
 /// Big-endian reads that fail instead of panicking.
-struct Reader<'a> {
-  bytes: &'a [u8],
-  at: usize,
+pub(crate) struct Reader<'a> {
+  pub(crate) bytes: &'a [u8],
+  pub(crate) at: usize,
 }
 
 impl<'a> Reader<'a> {
-  fn take(&mut self, n: usize) -> Result<&'a [u8], FileError> {
+  pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], FileError> {
     let slice = self.bytes.get(self.at..self.at.checked_add(n).ok_or_else(|| invalid("damaged file"))?).ok_or_else(|| invalid("file ends early"))?;
     self.at += n;
     Ok(slice)
   }
-  fn u8(&mut self) -> Result<u8, FileError> {
+  pub(crate) fn u8(&mut self) -> Result<u8, FileError> {
     Ok(self.take(1)?[0])
   }
-  fn u16(&mut self) -> Result<u16, FileError> {
+  pub(crate) fn u16(&mut self) -> Result<u16, FileError> {
     Ok(u16::from_be_bytes(self.take(2)?.try_into().expect("2 bytes")))
   }
-  fn u32(&mut self) -> Result<u32, FileError> {
+  pub(crate) fn u32(&mut self) -> Result<u32, FileError> {
     Ok(u32::from_be_bytes(self.take(4)?.try_into().expect("4 bytes")))
   }
-  fn i32(&mut self) -> Result<i32, FileError> {
+  pub(crate) fn i32(&mut self) -> Result<i32, FileError> {
     Ok(i32::from_be_bytes(self.take(4)?.try_into().expect("4 bytes")))
   }
 }
