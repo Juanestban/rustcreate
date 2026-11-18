@@ -17,10 +17,11 @@ pressure and tilt on Windows (true of older winit versions; 0.30 reads pressure)
   there with no unsafe code.
 - What winit drops (the **eraser end** and the **barrel button**) is read through `windows-sys` in
   a window subclass (`crates/app/src/pen.rs`) that only looks at `GetPointerPenInfo` and passes
-  every message on unchanged. The eraser end erases with the current brush; the barrel button
-  is the eyedropper. The same module turns off press-and-hold right click and the tap ripples.
-- **Tilt** is not read yet: no brush uses it. It joins the subclass when Brush Studio adds tilt
-  parameters.
+  every message on unchanged. The eraser end erases with the eraser tool's brush; the barrel
+  button is the eyedropper. The same module turns off press-and-hold right click and the tap ripples.
+- **Tilt** is read in the same subclass (`tiltX`/`tiltY`, when the pen reports them) as one lean
+  value, 0 upright to 1 flat. Brushes use it for size and flow (Brush Studio). It is sampled once
+  per frame, not per coalesced sample.
 - The mouse is the fallback, with a fixed pressure of 1.0.
 - **Wintab** goes to the roadmap for older tablets that do not support Windows Ink.
 

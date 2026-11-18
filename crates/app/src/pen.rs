@@ -1,25 +1,36 @@
 //! Pen extras on Windows Ink (ADR 0004). winit already turns `WM_POINTER` into egui touch events
-//! with pressure and every coalesced sample; this adds what it drops: the eraser end and the
-//! barrel button, read from `GetPointerPenInfo` in a window subclass that then passes every
+//! with pressure and every coalesced sample; this adds what it drops: the eraser end, the barrel
+//! button and the tilt, read from `GetPointerPenInfo` in a window subclass that then passes every
 //! message on to winit. It also turns off Windows Ink's press-and-hold right click and tap
 //! ripples, which get in the way of painting.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 static ERASER: AtomicBool = AtomicBool::new(false);
 static BARREL: AtomicBool = AtomicBool::new(false);
+/// `f32` bits: 0 upright ..= 1 flat.
+static TILT: AtomicU32 = AtomicU32::new(0);
 
-/// What the pen's buttons are doing right now.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// What the pen's buttons are doing right now, and how far it leans.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Buttons {
   /// The pen is flipped to its eraser end.
   pub eraser: bool,
   /// The side (barrel) button is held.
   pub barrel: bool,
+  /// 0 upright ..= 1 lying flat; 0 for pens without tilt and for the mouse.
+  pub tilt: f32,
 }
 
 pub fn buttons() -> Buttons {
-  Buttons { eraser: ERASER.load(Ordering::Relaxed), barrel: BARREL.load(Ordering::Relaxed) }
+  Buttons { eraser: ERASER.load(Ordering::Relaxed), barrel: BARREL.load(Ordering::Relaxed), tilt: f32::from_bits(TILT.load(Ordering::Relaxed)) }
+}
+
+/// The lean from vertical, 0..=1, from Windows Ink's tilt toward X and Y in degrees.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn lean(tilt_x: i32, tilt_y: i32) -> f32 {
+  let (x, y) = ((tilt_x as f32).to_radians().tan(), (tilt_y as f32).to_radians().tan());
+  (x.hypot(y).atan() / std::f32::consts::FRAC_PI_2).clamp(0.0, 1.0)
 }
 
 #[cfg(not(windows))]
@@ -42,10 +53,11 @@ mod windows {
   use windows_sys::Win32::UI::Input::Pointer::{GetPointerPenInfo, GetPointerType, POINTER_PEN_INFO};
   use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
   use windows_sys::Win32::UI::WindowsAndMessaging::{
-    PEN_FLAG_BARREL, PEN_FLAG_ERASER, PEN_FLAG_INVERTED, PT_PEN, SetPropW, WM_POINTERDOWN, WM_POINTERLEAVE, WM_POINTERUP, WM_POINTERUPDATE,
+    PEN_FLAG_BARREL, PEN_FLAG_ERASER, PEN_FLAG_INVERTED, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN, SetPropW, WM_POINTERDOWN, WM_POINTERLEAVE,
+    WM_POINTERUP, WM_POINTERUPDATE,
   };
 
-  use super::{BARREL, ERASER};
+  use super::{BARREL, ERASER, TILT, lean};
 
   // From tpcshrd.h: the flags Windows Ink reads from this window property.
   const TABLET_DISABLE_PRESSANDHOLD: usize = 0x0000_0001;
@@ -81,15 +93,32 @@ mod windows {
         if unsafe { GetPointerType(pointer, &mut kind) } != 0 && kind == PT_PEN && unsafe { GetPointerPenInfo(pointer, &mut info) } != 0 {
           ERASER.store(info.penFlags & (PEN_FLAG_ERASER | PEN_FLAG_INVERTED) != 0, Ordering::Relaxed);
           BARREL.store(info.penFlags & PEN_FLAG_BARREL != 0, Ordering::Relaxed);
+          let x = if info.penMask & PEN_MASK_TILT_X != 0 { info.tiltX } else { 0 };
+          let y = if info.penMask & PEN_MASK_TILT_Y != 0 { info.tiltY } else { 0 };
+          TILT.store(lean(x, y).to_bits(), Ordering::Relaxed);
         }
       }
       WM_POINTERLEAVE => {
         ERASER.store(false, Ordering::Relaxed);
         BARREL.store(false, Ordering::Relaxed);
+        TILT.store(0, Ordering::Relaxed);
       }
       _ => {}
     }
     // SAFETY: forwards the untouched message to the next procedure (winit's).
     unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::lean;
+
+  #[test]
+  fn lean_from_tilt_angles() {
+    assert_eq!(lean(0, 0), 0.0);
+    assert!((lean(45, 0) - 0.5).abs() < 1e-4);
+    assert!((lean(0, -90) - 1.0).abs() < 1e-4);
+    assert!(lean(40, 40) > lean(40, 0), "leaning both ways leans further");
   }
 }

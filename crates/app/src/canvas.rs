@@ -357,6 +357,7 @@ impl Canvas {
           self.tools.used_color();
         }
         let p = to_canvas(origin);
+        stroke.set_tilt(pen.tilt);
         match self.last_point {
           Some(from) if shift => stroke.line(doc, from, (p.x, p.y), pressure),
           _ => stroke.add(doc, p.x, p.y, pressure),
@@ -373,6 +374,9 @@ impl Canvas {
     {
       let now = ui.input(|i| i.time);
       let pressure = moves.last().map_or(self.pen.unwrap_or(1.0), |&(_, pressure)| pressure);
+      // shortcut: one tilt per frame (the latest), not per coalesced sample; sample it in the
+      // subclass with the pointer id if strokes show steps.
+      stroke.set_tilt(if self.pen.is_some() { pen.tilt } else { 0.0 });
       for (p, pressure) in moves {
         if p.distance(self.hold.1) > HOLD_SLOP {
           self.hold = (now, p);

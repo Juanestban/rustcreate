@@ -65,8 +65,8 @@ fn builtins() -> Vec<Entry> {
   let base = Brush::ink();
   let flat = Brush { taper_start: 0.0, taper_end: 0.0, streamline: 0.1, ..base };
   let list: [(&str, usize, Brush); 20] = [
-    ("graphite", 0, Brush::pencil()),
-    ("soft-graphite", 0, Brush { size: 10.0, hardness: 0.3, flow: 0.5, grain_depth: 0.75, ..Brush::pencil() }),
+    ("graphite", 0, Brush { tilt_size: 0.7, tilt_flow: 0.5, ..Brush::pencil() }),
+    ("soft-graphite", 0, Brush { tilt_size: 1.0, tilt_flow: 0.6, size: 10.0, hardness: 0.3, flow: 0.5, grain_depth: 0.75, ..Brush::pencil() }),
     ("technical-pencil", 0, Brush { size: 3.0, hardness: 1.0, flow: 0.9, pressure_size: 0.2, grain: Grain::None, ..Brush::pencil() }),
     (
       "sketch-chalk",
@@ -157,7 +157,18 @@ fn builtins() -> Vec<Entry> {
     (
       "charcoal",
       4,
-      Brush { size: 28.0, tip: Tip::Chalk, follow: true, flow: 0.9, pressure_size: 0.4, grain: Grain::Noise, grain_depth: 0.6, ..flat },
+      Brush {
+        tilt_size: 0.8,
+        tilt_flow: 0.4,
+        size: 28.0,
+        tip: Tip::Chalk,
+        follow: true,
+        flow: 0.9,
+        pressure_size: 0.4,
+        grain: Grain::Noise,
+        grain_depth: 0.6,
+        ..flat
+      },
     ),
     (
       "pastel",

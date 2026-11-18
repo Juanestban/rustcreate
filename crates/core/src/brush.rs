@@ -52,6 +52,10 @@ pub struct Brush {
   /// Paint load 0..=1: how long the brush lasts before it runs dry (thinner, then more of the
   /// picked-up color). 1 = never runs out.
   pub charge: f32,
+  /// Pen tilt: how much leaning the pen over widens the dab (up to 3×), and how much it thins
+  /// the paint, for shading with the side of a pencil. 0..=1 each.
+  pub tilt_size: f32,
+  pub tilt_flow: f32,
   /// The dab's shape.
   pub tip: Tip,
   /// Tip rotation in degrees.
@@ -95,6 +99,8 @@ impl Brush {
       motion_filter: 0.0,
       wet_mix: 0.0,
       charge: 1.0,
+      tilt_size: 0.0,
+      tilt_flow: 0.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -124,6 +130,8 @@ impl Brush {
       motion_filter: 0.0,
       wet_mix: 0.0,
       charge: 1.0,
+      tilt_size: 0.0,
+      tilt_flow: 0.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -153,6 +161,8 @@ impl Brush {
       motion_filter: 0.0,
       wet_mix: 0.0,
       charge: 1.0,
+      tilt_size: 0.0,
+      tilt_flow: 0.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -183,6 +193,8 @@ struct Dab {
   color: [f32; 3],
   /// Paint left in the brush, 0..=1: thins the dab as it runs dry.
   load: f32,
+  /// Pen tilt when the dab was placed, 0 upright ..= 1 flat.
+  tilt: f32,
 }
 
 type Textures = (Option<&'static [f32]>, Option<&'static [f32]>);
@@ -251,6 +263,8 @@ pub struct Stroke {
   /// Wet mixing: the color the brush carries, and the paint left in it.
   carried: Option<[f32; 3]>,
   load: f32,
+  /// The pen's tilt now, 0 upright ..= 1 flat (0 for a mouse).
+  tilt: f32,
   /// Raw pointer samples, for QuickShape.
   points: Vec<(f32, f32)>,
   /// Symmetry: every dab is also stamped through each of these.
@@ -285,6 +299,7 @@ impl Document {
       placed: 0,
       carried: None,
       load: 1.0,
+      tilt: 0.0,
       points: Vec::new(),
       mirrors: Vec::new(),
       motion: MotionFilter::default(),
@@ -360,7 +375,7 @@ impl Stroke {
     let tail = self.dabs.iter().position(|d| total - d.at < taper).unwrap_or(self.dabs.len());
     let mut affected = HashSet::new();
     for d in self.dabs[tail..].iter().flat_map(|&d| self.copies(d)) {
-      let radius = self.diameter(d.pressure, d.at) / 2.0;
+      let radius = self.diameter(d.pressure, d.at) * d.size / 2.0;
       for ty in ((d.y - radius).max(0.0) as u32 / TILE)..=((d.y + radius).max(0.0) as u32 / TILE) {
         for tx in ((d.x - radius).max(0.0) as u32 / TILE)..=((d.x + radius).max(0.0) as u32 / TILE) {
           if self.tiles.contains_key(&(tx, ty)) {
@@ -391,6 +406,16 @@ impl Stroke {
       self.mirrors = symmetry.mirrors(center);
     }
     self
+  }
+
+  /// The pen's tilt for the next samples: 0 upright ..= 1 lying flat.
+  pub fn set_tilt(&mut self, tilt: f32) {
+    self.tilt = tilt.clamp(0.0, 1.0);
+  }
+
+  /// How much the current tilt widens the dabs.
+  fn tilt_scale(&self) -> f32 {
+    1.0 + 2.0 * self.brush.tilt_size.clamp(0.0, 1.0) * self.tilt
   }
 
   /// The pointer samples so far, unsmoothed.
@@ -430,7 +455,7 @@ impl Stroke {
       let t = if length > 0.0 { at / length } else { 1.0 };
       let pressure = a.2 + (b.2 - a.2) * t;
       self.dab(doc, a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, pressure);
-      let step = (self.diameter(pressure, self.travelled) * self.brush.spacing).max(0.5);
+      let step = (self.diameter(pressure, self.travelled) * self.tilt_scale() * self.brush.spacing).max(0.5);
       at += step;
       self.travelled += step;
     }
@@ -454,10 +479,10 @@ impl Stroke {
     let diameter = self.diameter(pressure, self.travelled);
     let (r, a) = (b.scatter * diameter * random(0).abs().sqrt(), random(1) * std::f32::consts::PI);
     let angle = b.angle.to_radians() + if b.follow { self.direction } else { 0.0 } + random(2) * b.angle_jitter * std::f32::consts::PI;
-    let size = 1.0 - b.size_jitter.clamp(0.0, 1.0) * (random(3) * 0.5 + 0.5);
+    let size = (1.0 - b.size_jitter.clamp(0.0, 1.0) * (random(3) * 0.5 + 0.5)) * self.tilt_scale();
     let (x, y) = (x + r * a.cos(), y + r * a.sin());
     let (color, load) = self.wet(doc, x, y, diameter / 2.0);
-    let dab = Dab { x, y, pressure, at: self.travelled, angle, size, color, load };
+    let dab = Dab { x, y, pressure, at: self.travelled, angle, size, color, load, tilt: self.tilt };
     if self.smudge {
       return self.smudge_dab(doc, dab);
     }
@@ -559,7 +584,10 @@ impl Stroke {
     let textures = Self::textures(&self.brush);
     let Some(layer) = doc.layers.iter_mut().find(|l| l.id == self.layer_id) else { return };
     // A brush running dry thins down to a quarter.
-    let flow = self.brush.flow * (1.0 - self.brush.pressure_flow * (1.0 - d.pressure)) * (0.25 + 0.75 * d.load);
+    let flow = self.brush.flow
+      * (1.0 - self.brush.pressure_flow * (1.0 - d.pressure))
+      * (0.25 + 0.75 * d.load)
+      * (1.0 - 0.85 * self.brush.tilt_flow.clamp(0.0, 1.0) * d.tilt);
     let opacity = self.brush.opacity.clamp(0.0, 1.0);
     let wet = self.brush.wet_mix > 0.0 && !self.erase;
     for ty in y0 / TILE..=y1 / TILE {
@@ -695,6 +723,8 @@ mod tests {
       motion_filter: 0.0,
       wet_mix: 0.0,
       charge: 1.0,
+      tilt_size: 0.0,
+      tilt_flow: 0.0,
       string: 0.0,
       tip: Tip::Round,
       angle: 0.0,
@@ -947,6 +977,21 @@ mod tests {
     }
     stroke.finish(&mut doc);
     assert!(rgb(&doc, 20, 50)[3] > 200 && rgb(&doc, 360, 50)[3] < 120, "{} → {}", rgb(&doc, 20, 50)[3], rgb(&doc, 360, 50)[3]);
+  }
+
+  #[test]
+  fn tilting_the_pen_widens_and_thins_the_stroke() {
+    let brush = Brush { tilt_size: 1.0, tilt_flow: 0.5, ..flat(10.0, 1.0) };
+    let mut doc = Document::new(300, 200);
+    for (tilt, y) in [(0.0, 50.0), (1.0, 140.0)] {
+      let mut stroke = doc.begin_stroke(brush, [0, 0, 0], false).unwrap();
+      stroke.set_tilt(tilt);
+      stroke.line(&mut doc, (40.0, y), (260.0, y), 1.0);
+      stroke.finish(&mut doc);
+    }
+    let width = |y: u32| (0..60).filter(|dy| alpha(&doc, 0, 150, y - 30 + dy) > 0).count();
+    assert!(width(50) <= 12 && width(140) >= 26, "upright {} vs flat {}", width(50), width(140));
+    assert!(alpha(&doc, 0, 150, 50) == 255 && alpha(&doc, 0, 150, 140) < 160, "flat is lighter");
   }
 
   #[test]

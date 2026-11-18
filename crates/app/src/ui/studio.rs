@@ -155,6 +155,8 @@ impl App {
             });
             row(ui, "ui-studio-pressure-size", &mut |ui| percent(ui, &mut brush.pressure_size, 1.0));
             row(ui, "ui-studio-pressure-flow", &mut |ui| percent(ui, &mut brush.pressure_flow, 1.0));
+            row(ui, "ui-studio-tilt-size", &mut |ui| percent(ui, &mut brush.tilt_size, 1.0));
+            row(ui, "ui-studio-tilt-flow", &mut |ui| percent(ui, &mut brush.tilt_flow, 1.0));
             row(ui, "ui-studio-wet-mix", &mut |ui| percent(ui, &mut brush.wet_mix, 1.0));
             row(ui, "ui-studio-charge", &mut |ui| percent(ui, &mut brush.charge, 1.0));
           }

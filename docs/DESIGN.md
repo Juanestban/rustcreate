@@ -40,7 +40,8 @@ file; do not silently diverge.
 ## Brushes
 
 - Our own engine with Procreate-like parameters: shape, grain, spacing, jitter (size, opacity,
-  angle), taper, streamline/stabilization, pressure and tilt curves, wet mix later.
+  angle), taper, streamline/stabilization, motion filtering, pressure and tilt dynamics, wet
+  mixing and paint charge.
 - Categories modeled after Procreate's library (Sketching, Inking, Drawing, Painting, Airbrushing,
   Textures…), built with our own textures.
 - v0.1 brushes: **Pencil, Ink, Airbrush, Eraser** (the eraser can use any brush).

@@ -197,3 +197,5 @@ ui-guide-edit = Edit guide
 ui-guide-edit-help = While on, drag the guide's points on the canvas (vanishing points, or the center); painting is paused.
 ui-studio-wet-mix = Wet mixing
 ui-studio-charge = Paint charge
+ui-studio-tilt-size = Tilt → size
+ui-studio-tilt-flow = Tilt → flow

@@ -17,10 +17,12 @@
   gradient, QuickShape, the color disc with harmonies and palettes, drawing guides with symmetry,
   brush import from `.brushset` and `.abr`, ColorDrop and the eyedropper loupe,
   motion filtering, perspective guides, QuickShape editing and arcs, wet
-  mixing.
+  mixing, pen tilt.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: pen tilt.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Then: the rest of Phase 2 (more brush
+  categories, brush and palette import/export, ColorDrop threshold drag, guide in the file) or
+  Phase 3.
 
 ## Phase 0 — Foundation
 
@@ -80,7 +82,8 @@
       the engine, reset
 - [x] Procedurally generated tips (round, square, chalk, bristles, splatter) and grains (paper,
       canvas, noise), all original (ADR 0006); rotation, follow-the-stroke, scatter, size jitter
-- [ ] Pen tilt in the brush dynamics
+- [x] Pen tilt (Windows Ink): leaning the pen widens the dab and thins the paint, per brush;
+      Graphite, Soft Graphite and Charcoal shade with it
 - [x] Smudge tool (`S`): patch smudging with the brush's shape and opacity, pressure-aware
 - [x] Wet mixing per brush: picks up the layer's color under the brush and carries it along;
       paint charge runs the brush dry (thinner, more picked-up color); Flat Brush, Round Bristle
