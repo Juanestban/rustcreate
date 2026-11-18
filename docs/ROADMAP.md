@@ -6,11 +6,11 @@
   CI and release packaging copied from archi-games. App skeleton: eframe window with the icon,
   system dark/light theme, Fluent `en`/`es`, updater (startup + every 5 h, banner, verified
   install). `core`: tiled layers, layer stack operations, blend modes, undo/redo history, `.rcreate`
-  save/open and PNG export.
+  save/open and PNG export. `render`: wgpu compositor and canvas view with zoom, pan and rotation.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** create `crates/render`: wgpu canvas sharing eframe's device, zoom/pan/rotate, then
-  the brush engine.
+- **Next:** the brush engine (dab stamping with pressure, spacing, taper, streamline) and the
+  four v0.1 brushes.
 
 ## Phase 0 — Foundation
 
@@ -32,12 +32,12 @@
 - [x] `.rcreate` save/open (atomic save, validated on open, thumbnail), PNG export
 
 ### Render (`crates/render`)
-- [ ] wgpu canvas sharing eframe's device (paint callback)
-- [ ] Zoom, pan, rotate view
+- [x] wgpu canvas sharing eframe's device (paint callback)
+- [x] Zoom, pan, rotate view (pinch/Ctrl+wheel, scroll, Space/middle drag, hold R, Ctrl+0/1/+/-, Esc)
 - [ ] Brush engine: dab stamping with spacing, size/opacity from pressure, taper, streamline
 - [ ] Brushes: Pencil, Ink, Airbrush, Eraser
-- [ ] Layer compositor with blend-mode shaders
-- [ ] Dirty-tile uploads
+- [x] Layer compositor with blend-mode shaders (GPU test checks every mode against `core::blend`)
+- [x] Dirty-tile uploads
 
 ### App (`crates/app`)
 - [ ] Procreate-like layout: top bar, side size/opacity sliders, floating panels

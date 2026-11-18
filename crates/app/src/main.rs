@@ -1,11 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod canvas;
 mod i18n;
 mod update;
 mod updates;
 
+use canvas::Canvas;
 use eframe::egui;
 use i18n::{I18n, Language};
+use rustcreate_core::Document;
 use updates::{Status, Updates};
 
 fn main() -> eframe::Result {
@@ -21,19 +24,26 @@ fn main() -> eframe::Result {
 struct App {
   i18n: I18n,
   updates: Updates,
+  doc: Document,
+  canvas: Canvas,
 }
 
 impl App {
   fn new(cc: &eframe::CreationContext) -> Self {
-    Self { i18n: I18n::new(Language::system()), updates: Updates::start(cc.egui_ctx.clone()) }
+    // shortcut: a fixed blank canvas until the gallery and "New canvas" exist.
+    let doc = Document::new(2048, 1536);
+    let render_state = cc.wgpu_render_state.as_ref().expect("eframe runs on wgpu (ADR 0001)");
+    let canvas = Canvas::new(render_state, &doc);
+    Self { i18n: I18n::new(Language::system()), updates: Updates::start(cc.egui_ctx.clone()), doc, canvas }
   }
 }
 
 impl eframe::App for App {
-  fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+  fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
     self.update_banner(ui);
-    egui::CentralPanel::default().show(ui, |ui| {
-      ui.centered_and_justified(|ui| ui.weak(self.i18n.tr("ui-canvas-empty")));
+    let render_state = frame.wgpu_render_state().expect("eframe runs on wgpu (ADR 0001)");
+    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(ui.visuals().extreme_bg_color)).show(ui, |ui| {
+      self.canvas.show(ui, render_state, &mut self.doc);
     });
   }
 }

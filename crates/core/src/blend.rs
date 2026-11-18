@@ -19,7 +19,8 @@ pub fn composite(dst: &mut [u8], src: &[u8], opacity: f32, mode: BlendMode) {
       let sc = s[c] as f32 / 255.0 * opacity;
       let dc = d[c] as f32 / 255.0;
       // B() works on straight (unpremultiplied) colors.
-      let (cs, cd) = (sc / sa, if da > 0.0 { dc / da } else { 0.0 });
+      // Clamped: rounding can push a straight color just past 1, which breaks dodge and burn.
+      let (cs, cd) = ((sc / sa).min(1.0), if da > 0.0 { (dc / da).min(1.0) } else { 0.0 });
       let mixed = (1.0 - sa) * dc + (1.0 - da) * sc + sa * da * blend(mode, cs, cd);
       d[c] = (mixed.clamp(0.0, ra) * 255.0).round() as u8;
     }
@@ -37,16 +38,12 @@ fn blend(mode: BlendMode, cs: f32, cd: f32) -> f32 {
     BlendMode::Darken => cs.min(cd),
     BlendMode::Lighten => cs.max(cd),
     BlendMode::Add => (cs + cd).min(1.0),
-    BlendMode::ColorDodge => match (cd, cs) {
-      (0.0, _) => 0.0,
-      (_, 1.0) => 1.0,
-      _ => (cd / (1.0 - cs)).min(1.0),
-    },
-    BlendMode::ColorBurn => match (cd, cs) {
-      (1.0, _) => 1.0,
-      (_, 0.0) => 0.0,
-      _ => 1.0 - ((1.0 - cd) / cs).min(1.0),
-    },
+    BlendMode::ColorDodge if cd <= 0.0 => 0.0,
+    BlendMode::ColorDodge if cs >= 1.0 => 1.0,
+    BlendMode::ColorDodge => (cd / (1.0 - cs)).min(1.0),
+    BlendMode::ColorBurn if cd >= 1.0 => 1.0,
+    BlendMode::ColorBurn if cs <= 0.0 => 0.0,
+    BlendMode::ColorBurn => 1.0 - ((1.0 - cd) / cs).min(1.0),
   }
 }
 

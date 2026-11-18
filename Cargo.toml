@@ -11,9 +11,11 @@ keywords = ["procreate", "graphics", "draw", "art-design"]
 
 [workspace.dependencies]
 rustcreate-core = { path = "crates/core" }
+rustcreate-render = { path = "crates/render" }
 eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "wayland", "x11"] }
 fluent-bundle = "0.16"
 png = "0.18"
+pollster = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
 resvg = "0.45"
 serde = { version = "1", features = ["derive"] }
@@ -23,6 +25,8 @@ sys-locale = "0.3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "time"] }
 unic-langid = "0.9"
+# Same major as eframe's; DX12 first, Vulkan as fallback (DESIGN), Metal for macOS later.
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "dx12", "vulkan", "metal"] }
 winresource = "0.1"
 # Only `Stored` entries (ADR 0003): no compression backends.
 zip = { version = "9.7", default-features = false }

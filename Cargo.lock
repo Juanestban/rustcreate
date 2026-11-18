@@ -847,7 +847,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "pollster",
+ "pollster 1.0.2",
  "profiling",
  "raw-window-handle",
  "send_wrapper",
@@ -2847,6 +2847,12 @@ dependencies = [
 
 [[package]]
 name = "pollster"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
+
+[[package]]
+name = "pollster"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c2c80c4e3afbec8224b9d3e641fbf3a5690cc7595b887b0a27a926bb357ed5c"
@@ -3122,6 +3128,7 @@ dependencies = [
  "reqwest",
  "resvg",
  "rustcreate-core",
+ "rustcreate-render",
  "serde",
  "serde_json",
  "sha2",
@@ -3141,6 +3148,15 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "zip",
+]
+
+[[package]]
+name = "rustcreate-render"
+version = "0.1.0"
+dependencies = [
+ "pollster 0.4.0",
+ "rustcreate-core",
+ "wgpu",
 ]
 
 [[package]]

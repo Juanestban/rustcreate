@@ -4,7 +4,7 @@ pub mod blend;
 mod file;
 mod history;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub use file::{FORMAT, FileError};
@@ -47,11 +47,13 @@ pub struct Layer {
   pub blend: BlendMode,
   /// Only tiles that were painted exist; a missing tile is fully transparent.
   tiles: HashMap<(u32, u32), Tile>,
+  /// Tiles written through `tile_mut` since the renderer last looked (see `take_dirty`).
+  dirty: HashSet<(u32, u32)>,
 }
 
 impl Layer {
   fn new(id: u64, name: String) -> Self {
-    Self { id, name, opacity: 1.0, hidden: false, locked: false, blend: BlendMode::Normal, tiles: HashMap::new() }
+    Self { id, name, opacity: 1.0, hidden: false, locked: false, blend: BlendMode::Normal, tiles: HashMap::new(), dirty: HashSet::new() }
   }
 
   pub fn tile(&self, tx: u32, ty: u32) -> Option<&[u8]> {
@@ -61,7 +63,24 @@ impl Layer {
   /// The tile at `(tx, ty)` for painting, created transparent if empty. Copies it first if the
   /// history still holds it, so call [`Document::checkpoint`] before a stroke, not per tile.
   pub fn tile_mut(&mut self, tx: u32, ty: u32) -> &mut [u8] {
+    self.dirty.insert((tx, ty));
     Arc::make_mut(self.tiles.entry((tx, ty)).or_insert_with(|| Arc::from(vec![0; TILE_BYTES])))
+  }
+
+  /// Coordinates of the painted tiles.
+  pub fn tile_coords(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+    self.tiles.keys().copied()
+  }
+
+  /// The tile's shared buffer, to tell whether it was replaced (undo, open) without comparing
+  /// pixels.
+  pub fn tile_ptr(&self, tx: u32, ty: u32) -> Option<*const u8> {
+    self.tiles.get(&(tx, ty)).map(|tile| tile.as_ptr())
+  }
+
+  /// Tiles painted in place since the last call. Replaced tiles are found with `tile_ptr`.
+  pub fn take_dirty(&mut self) -> HashSet<(u32, u32)> {
+    std::mem::take(&mut self.dirty)
   }
 
   pub fn painted_tiles(&self) -> usize {
@@ -126,6 +145,10 @@ impl Document {
   /// A layer to paint on or edit. Call [`Document::checkpoint`] first to make it undoable.
   pub fn layer_mut(&mut self, index: usize) -> Option<&mut Layer> {
     self.layers.get_mut(index)
+  }
+
+  pub fn layers_mut(&mut self) -> impl Iterator<Item = &mut Layer> {
+    self.layers.iter_mut()
   }
 
   pub fn undo(&mut self) -> bool {

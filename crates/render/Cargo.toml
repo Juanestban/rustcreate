@@ -1,0 +1,13 @@
+[package]
+name = "rustcreate-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rustcreate-core.workspace = true
+wgpu.workspace = true
+
+[dev-dependencies]
+pollster.workspace = true

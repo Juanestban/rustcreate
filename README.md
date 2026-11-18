@@ -102,7 +102,7 @@ libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev`.
 
 ```
 crates/core     document model: canvas tiles, layers, blend modes, history, .rcreate files (no GPU)
-crates/render   (planned) wgpu: brush engine, layer compositor, blend-mode shaders
+crates/render   wgpu: layer compositor, blend-mode shaders, canvas view
 crates/app      the app: egui interface, themes, icons, shortcuts, texts (locales/), updater
 docs/           design, roadmap, shortcuts and architecture decisions (docs/adr/)
 wix/            MSI installer definition
