@@ -27,7 +27,19 @@ fn main() -> eframe::Result {
     viewport: egui::ViewportBuilder::default().with_title("rustcreate").with_icon(icon).with_inner_size([1280.0, 800.0]),
     ..Default::default()
   };
-  eframe::run_native("rustcreate", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+  let result = eframe::run_native("rustcreate", options, Box::new(|cc| Ok(Box::new(App::new(cc)))));
+  if let Err(error) = &result {
+    startup_failed(error);
+  }
+  result
+}
+
+/// The window could not start, almost always for want of a DX12/Vulkan GPU (ADR 0001). A release
+/// build has no console, so say it in a native dialog, in the user's language.
+fn startup_failed(error: &eframe::Error) {
+  let i18n = I18n::new(Settings::load().language());
+  let reason = if matches!(error, eframe::Error::Wgpu(_)) { i18n.tr("ui-error-gpu") } else { i18n.tr("ui-error-start") };
+  rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("rustcreate").set_description(format!("{reason}\n\n{error}")).show();
 }
 
 /// Something that would drop unsaved changes, held until the user answers "Save changes?".

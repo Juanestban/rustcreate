@@ -11,10 +11,12 @@
   top bar, sidebar sliders, brush/layers/color/actions panels, own icons, dark/light palette,
   file dialogs, unsaved-changes prompt, all v0.1 Photoshop shortcuts. Pen input through
   Windows Ink (pressure, eraser end, barrel button). Settings (language, theme, update checks)
-  and the "New canvas" dialog.
+  and the "New canvas" dialog. A native error dialog when no DX12/Vulkan GPU is found. **All
+  v0.1 features are in.**
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** the clear "no GPU" error, the last v0.1 item; then test on Windows and tag v0.1.0.
+- **Next:** test on a Windows machine with a pen (build, MSI, portable EXE, pressure, eraser
+  end), fix what shows up, then tag `v0.1.0` (see `RELEASING.md`). After that, Phase 2.
 
 ## Phase 0 — Foundation
 
@@ -59,7 +61,7 @@
       theme, automatic update checks
 - [x] "New canvas" dialog: presets, custom size capped by the GPU, remembers the last size
 - [x] Unsaved-changes prompt on close, new, open and before updating; Open/Save/Export dialogs
-- [ ] Clear error when no DX12/Vulkan GPU is available
+- [x] Clear error when no DX12/Vulkan GPU is available (native dialog in the user's language)
 
 ## Phase 2 — Painting depth
 

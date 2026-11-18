@@ -74,3 +74,5 @@ ui-canvas-height = Alto
 ui-canvas-swap = Intercambiar ancho y alto
 ui-canvas-max = Hasta { $max } px por lado en esta GPU.
 ui-canvas-create = Crear
+ui-error-gpu = rustcreate necesita una tarjeta gráfica con DirectX 12 o Vulkan y no se encontró ninguna. Actualiza los controladores de la gráfica e inténtalo de nuevo.
+ui-error-start = rustcreate no pudo iniciarse.
