@@ -8,15 +8,21 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-cargo build --release --locked -p rustcreate
+# Cargo reports where it put the executable and the build script's OUT_DIR (where build.rs
+# writes the icon). Asking beats guessing: the build directory layout changes between Cargo
+# versions. Diagnostics still go to the console.
+$messages = cargo build --release --locked -p rustcreate --message-format=json-render-diagnostics | ForEach-Object { $_ | ConvertFrom-Json }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$app = $messages | Where-Object { $_.reason -eq "compiler-artifact" -and $_.target.name -eq "rustcreate" -and $_.executable } | Select-Object -Last 1
+if (-not $app) { throw "cargo did not report the rustcreate executable" }
+$exe = $app.executable
+$build = $messages | Where-Object { $_.reason -eq "build-script-executed" -and $_.package_id -eq $app.package_id } | Select-Object -Last 1
+if (-not $build) { throw "cargo did not report the rustcreate build script" }
+$icon = Get-Item (Join-Path $build.out_dir "rustcreate.ico") -ErrorAction SilentlyContinue
+if (-not $icon) { throw "rustcreate.ico not found in $($build.out_dir): did build.rs run on Windows?" }
 
 # The workspace version, e.g. 0.1.0.
 $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-$exe = Join-Path $root "target\release\rustcreate.exe"
-# build.rs writes the icon into the build script's output directory.
-$icon = Get-ChildItem "target\release\build\rustcreate-*\out\rustcreate.ico" | Sort-Object LastWriteTime | Select-Object -Last 1
-if (-not $icon) { throw "rustcreate.ico not found: did build.rs run?" }
 
 $dist = Join-Path $root "target\dist"
 Remove-Item $dist -Recurse -Force -ErrorAction SilentlyContinue
