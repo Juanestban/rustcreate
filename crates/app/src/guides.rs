@@ -1,5 +1,6 @@
-//! The drawing guide: a 2D or isometric grid, or symmetry axes, drawn over the canvas. With
-//! Drawing Assist, grid strokes lock to the grid's directions and symmetry strokes are mirrored.
+//! The drawing guide: a 2D or isometric grid, perspective with 1 to 3 vanishing points, or
+//! symmetry axes, drawn over the canvas. With Drawing Assist, grid and perspective strokes lock to
+//! the guide's lines and symmetry strokes are mirrored. Its points can be dragged while editing.
 
 use std::f32::consts::{FRAC_PI_2, PI};
 
@@ -12,22 +13,40 @@ pub enum Kind {
   Off,
   Grid,
   Isometric,
+  Perspective,
   Symmetry,
 }
 
-/// shortcut: the guide belongs to the session, not the file; save it in `.rcp` when files grow
-/// per-canvas settings.
+/// shortcut: the guide belongs to the session, not the file; save it in `.rcreate` when files
+/// grow per-canvas settings.
 pub struct Guides {
   pub kind: Kind,
   /// Grid spacing in canvas pixels.
   pub spacing: f32,
   pub symmetry: Symmetry,
+  /// Vanishing points in use, 1 to 3.
+  pub points: usize,
   pub assist: bool,
+  /// Dragging on the canvas moves the guide's points instead of painting.
+  pub editing: bool,
+  /// Center of the grid and the symmetry, as a fraction of the canvas size.
+  center: Pos2,
+  /// Vanishing points, as fractions of the canvas size (they may lie outside it).
+  vanishing: [Pos2; 3],
 }
 
 impl Default for Guides {
   fn default() -> Self {
-    Self { kind: Kind::Off, spacing: 100.0, symmetry: Symmetry::Vertical, assist: true }
+    Self {
+      kind: Kind::Off,
+      spacing: 100.0,
+      symmetry: Symmetry::Vertical,
+      points: 1,
+      assist: true,
+      editing: false,
+      center: pos2(0.5, 0.5),
+      vanishing: [pos2(0.5, 0.4), pos2(1.1, 0.4), pos2(0.5, 1.6)],
+    }
   }
 }
 
@@ -35,12 +54,46 @@ impl Default for Guides {
 const DECIDE: f32 = 6.0;
 
 impl Guides {
-  /// Line directions in radians (mod π): the grid's, which assisted strokes follow.
-  fn directions(&self) -> &'static [f32] {
+  /// The draggable points, in canvas pixels: the vanishing points, or the center.
+  pub fn handles(&self, size: Vec2) -> Vec<Pos2> {
+    let scale = |p: Pos2| pos2(p.x * size.x, p.y * size.y);
     match self.kind {
-      Kind::Grid => &[0.0, FRAC_PI_2],
-      Kind::Isometric => &[PI / 6.0, FRAC_PI_2, PI * 5.0 / 6.0],
-      Kind::Off | Kind::Symmetry => &[],
+      Kind::Off => Vec::new(),
+      Kind::Perspective => self.vanishing[..self.points].iter().map(|&p| scale(p)).collect(),
+      Kind::Grid | Kind::Isometric | Kind::Symmetry => vec![scale(self.center)],
+    }
+  }
+
+  /// Moves handle `index` (from `handles`) to `p`, in canvas pixels.
+  pub fn move_handle(&mut self, index: usize, p: Pos2, size: Vec2) {
+    let p = pos2(p.x / size.x, p.y / size.y);
+    match self.kind {
+      Kind::Perspective => self.vanishing[index] = p,
+      _ => self.center = p,
+    }
+  }
+
+  /// The center symmetric strokes turn around, in canvas pixels.
+  pub fn center(&self, size: Vec2) -> Pos2 {
+    pos2(self.center.x * size.x, self.center.y * size.y)
+  }
+
+  /// Line directions in radians (mod π) a stroke starting at `start` may follow.
+  fn directions(&self, start: Pos2, size: Vec2) -> Vec<f32> {
+    match self.kind {
+      Kind::Grid => vec![0.0, FRAC_PI_2],
+      Kind::Isometric => vec![PI / 6.0, FRAC_PI_2, PI * 5.0 / 6.0],
+      Kind::Perspective => {
+        let toward = self.handles(size).into_iter().filter(|&vp| (vp - start).length() > 1.0).map(|vp| (vp - start).angle());
+        // One point keeps horizontals and verticals, two points keep verticals.
+        let straight: &[f32] = match self.points {
+          1 => &[0.0, FRAC_PI_2],
+          2 => &[FRAC_PI_2],
+          _ => &[],
+        };
+        toward.chain(straight.iter().copied()).collect()
+      }
+      Kind::Off | Kind::Symmetry => Vec::new(),
     }
   }
 
@@ -49,15 +102,18 @@ impl Guides {
     (self.kind == Kind::Symmetry && self.assist).then_some(self.symmetry)
   }
 
-  /// Drawing Assist on a grid: once the stroke has moved a little from `start`, it keeps to the
-  /// grid direction closest to that first movement. `None` while it is still deciding.
-  pub fn assist(&self, start: Pos2, p: Pos2, axis: &mut Option<f32>) -> Option<Pos2> {
-    let directions = self.directions();
-    if !self.assist || directions.is_empty() {
+  /// Drawing Assist: once the stroke has moved a little from `start`, it keeps to the guide line
+  /// closest to that first movement. `None` while it is still deciding.
+  pub fn assist(&self, start: Pos2, p: Pos2, size: Vec2, axis: &mut Option<f32>) -> Option<Pos2> {
+    if !self.assist {
       return Some(p);
     }
     let d = p - start;
     if axis.is_none() {
+      let directions = self.directions(start, size);
+      if directions.is_empty() {
+        return Some(p);
+      }
       if d.length() < DECIDE {
         return None;
       }
@@ -66,9 +122,9 @@ impl Guides {
         let t = (heading - a).rem_euclid(PI);
         t.min(PI - t)
       };
-      *axis = directions.iter().copied().min_by(|a, b| off(*a).total_cmp(&off(*b)));
+      *axis = directions.into_iter().min_by(|a, b| off(*a).total_cmp(&off(*b)));
     }
-    let along = Vec2::angled(axis.expect("just chosen"));
+    let along = Vec2::angled(axis.expect("chosen"));
     Some(start + along * d.dot(along))
   }
 
@@ -76,23 +132,40 @@ impl Guides {
   pub fn draw(&self, painter: &Painter, size: Vec2, color: Color32, to_screen: impl Fn(Pos2) -> Pos2) {
     let stroke = Stroke::new(1.0, color);
     let line = |a: Pos2, b: Pos2| painter.line_segment([to_screen(a), to_screen(b)], stroke);
-    let center = (size / 2.0).to_pos2();
+    let center = self.center(size);
     match self.kind {
       Kind::Off => {}
       Kind::Grid | Kind::Isometric => {
-        for &angle in self.directions() {
+        for angle in self.directions(center, size) {
           // Lines along `angle`, `spacing` apart, through the center.
           let (along, normal) = (Vec2::angled(angle), Vec2::angled(angle + FRAC_PI_2));
           let corners = [pos2(0.0, 0.0), pos2(size.x, 0.0), pos2(0.0, size.y), size.to_pos2()];
-          let reach = corners.iter().map(|c| (*c - center).dot(normal).abs()).fold(0.0, f32::max);
+          let (lo, hi) = corners.iter().map(|c| (*c - center).dot(normal)).fold((f32::MAX, f32::MIN), |(lo, hi), d| (lo.min(d), hi.max(d)));
+          let (first, last) = ((lo / self.spacing).floor() as i32, (hi / self.spacing).ceil() as i32);
           // Too dense to read: skip rather than paint thousands of lines.
-          let count = (reach / self.spacing) as i32;
-          if count > 400 {
+          if last - first > 800 {
             continue;
           }
-          for k in -count..=count {
-            let origin = center + normal * (k as f32 * self.spacing);
-            if let Some((a, b)) = clip(origin, along, size) {
+          for k in first..=last {
+            if let Some((a, b)) = clip(center + normal * (k as f32 * self.spacing), along, size) {
+              line(a, b);
+            }
+          }
+        }
+      }
+      Kind::Perspective => {
+        let points = self.handles(size);
+        // The horizon, through the first two points (level with one point).
+        let horizon = match points[..] {
+          [a, b, ..] => b - a,
+          _ => Vec2::X,
+        };
+        if let Some((a, b)) = clip(points[0], horizon, size) {
+          painter.line_segment([to_screen(a), to_screen(b)], Stroke::new(1.5, color));
+        }
+        for &vp in &points {
+          for k in 0..18 {
+            if let Some((a, b)) = clip(vp, Vec2::angled(k as f32 / 18.0 * PI), size) {
               line(a, b);
             }
           }
@@ -113,7 +186,14 @@ impl Guides {
             line(if radial { center } else { a }, b);
           }
         }
-        painter.circle_stroke(to_screen(center), 5.0, stroke);
+      }
+    }
+    // The points: small rings, bigger and filled while editing so they read as handles.
+    for p in self.handles(size) {
+      if self.editing {
+        painter.circle(to_screen(p), 9.0, color.gamma_multiply(0.35), Stroke::new(2.0, color));
+      } else if self.kind != Kind::Grid && self.kind != Kind::Isometric {
+        painter.circle_stroke(to_screen(p), 5.0, stroke);
       }
     }
   }
@@ -139,23 +219,50 @@ fn clip(origin: Pos2, along: Vec2, size: Vec2) -> Option<(Pos2, Pos2)> {
 mod tests {
   use super::*;
 
+  const SIZE: Vec2 = Vec2::new(1000.0, 1000.0);
+
   #[test]
   fn assist_locks_to_the_nearest_grid_direction() {
     let guides = Guides { kind: Kind::Grid, ..Guides::default() };
     let (start, mut axis) = (pos2(100.0, 100.0), None);
-    assert_eq!(guides.assist(start, pos2(102.0, 101.0), &mut axis), None, "still deciding");
-    let p = guides.assist(start, pos2(110.0, 102.0), &mut axis).unwrap();
+    assert_eq!(guides.assist(start, pos2(102.0, 101.0), SIZE, &mut axis), None, "still deciding");
+    let p = guides.assist(start, pos2(110.0, 102.0), SIZE, &mut axis).unwrap();
     assert_eq!(p, pos2(110.0, 100.0), "horizontal");
-    let p = guides.assist(start, pos2(150.0, 140.0), &mut axis).unwrap();
+    let p = guides.assist(start, pos2(150.0, 140.0), SIZE, &mut axis).unwrap();
     assert_eq!(p.y, 100.0, "stays horizontal for the whole stroke");
 
     let iso = Guides { kind: Kind::Isometric, ..Guides::default() };
     let mut axis = None;
-    let p = iso.assist(start, pos2(120.0, 108.0), &mut axis).unwrap();
+    let p = iso.assist(start, pos2(120.0, 108.0), SIZE, &mut axis).unwrap();
     assert!((axis.unwrap() - PI / 6.0).abs() < 1e-5 && (p - start).angle() - PI / 6.0 < 1e-4);
 
     let off = Guides { assist: false, ..guides };
-    assert_eq!(off.assist(start, pos2(103.0, 107.0), &mut None), Some(pos2(103.0, 107.0)));
+    assert_eq!(off.assist(start, pos2(103.0, 107.0), SIZE, &mut None), Some(pos2(103.0, 107.0)));
+  }
+
+  #[test]
+  fn perspective_assist_heads_for_the_vanishing_point() {
+    let mut guides = Guides { kind: Kind::Perspective, points: 2, ..Guides::default() };
+    // Vanishing points at (0, 400) and (1100, 400) on a 1000×1000 canvas.
+    guides.move_handle(0, pos2(0.0, 400.0), SIZE);
+    assert_eq!(guides.handles(SIZE), [pos2(0.0, 400.0), pos2(1100.0, 400.0)]);
+    let (start, mut axis) = (pos2(500.0, 600.0), None);
+    // Heading left and a bit up: toward the left vanishing point.
+    let p = guides.assist(start, pos2(480.0, 590.0), SIZE, &mut axis).unwrap();
+    let toward = (pos2(0.0, 400.0) - start).normalized();
+    assert!(((p - start).normalized() - toward).length() < 1e-4, "{p:?}");
+    // Straight up is a vertical with two points.
+    let mut axis = None;
+    let p = guides.assist(start, pos2(501.0, 560.0), SIZE, &mut axis).unwrap();
+    assert!((p.x - 500.0).abs() < 1e-3);
+  }
+
+  #[test]
+  fn the_center_moves_and_scales_with_the_canvas() {
+    let mut guides = Guides { kind: Kind::Symmetry, ..Guides::default() };
+    assert_eq!(guides.center(SIZE), pos2(500.0, 500.0));
+    guides.move_handle(0, pos2(250.0, 100.0), SIZE);
+    assert_eq!(guides.center(Vec2::new(2000.0, 500.0)), pos2(500.0, 50.0));
   }
 
   #[test]

@@ -93,6 +93,8 @@ pub struct Canvas {
   assist: (Pos2, Option<f32>),
   /// Eyedropper loupe while picking: where (screen), and the color before picking started.
   loupe: Option<(Pos2, [u8; 3])>,
+  /// The guide point being dragged while editing the guide.
+  handle: Option<usize>,
 }
 
 /// A ring by the pointer: the color under it on top, the one before picking below.
@@ -128,6 +130,7 @@ impl Canvas {
       snapped: false,
       assist: (Pos2::ZERO, None),
       loupe: None,
+      handle: None,
     }
   }
 
@@ -235,6 +238,25 @@ impl Canvas {
         moves,
       )
     });
+    // Editing the guide: drags move its points; nothing paints.
+    if self.tools.guides.editing && self.tools.guides.kind != crate::guides::Kind::Off {
+      let size = vec2(doc.width as f32, doc.height as f32);
+      if pressed && let Some(origin) = origin {
+        let at = to_canvas(origin);
+        // 18 points around the pointer, in canvas pixels.
+        let reach = (to_canvas(origin + vec2(18.0, 0.0)) - at).length();
+        self.handle = self.tools.guides.handles(size).iter().position(|h| (*h - at).length() < reach);
+      }
+      if let Some(index) = self.handle
+        && let Some(p) = ui.input(|i| i.pointer.interact_pos())
+      {
+        self.tools.guides.move_handle(index, to_canvas(p), size);
+      }
+      if released {
+        self.handle = None;
+      }
+      return;
+    }
     // Eyedropper: I, Alt held or the pen's barrel button.
     if (self.tools.picking || alt || pen.barrel) && self.stroke.is_none() && !view_drag {
       if response.is_pointer_button_down_on()
@@ -289,7 +311,8 @@ impl Canvas {
         Tool::Smudge => doc.begin_smudge(brush),
         _ => doc.begin_stroke(brush, color, tool == Tool::Eraser),
       };
-      let center = (doc.width as f32 / 2.0, doc.height as f32 / 2.0);
+      let center = self.tools.guides.center(vec2(doc.width as f32, doc.height as f32));
+      let center = (center.x, center.y);
       let stroke = stroke.map(|s| match self.tools.guides.symmetry() {
         Some(symmetry) => s.with_symmetry(symmetry, center),
         None => s,
@@ -319,7 +342,9 @@ impl Canvas {
         if p.distance(self.hold.1) > HOLD_SLOP {
           self.hold = (now, p);
         }
-        let Some(p) = self.tools.guides.assist(self.assist.0, to_canvas(p), &mut self.assist.1) else { continue };
+        let Some(p) = self.tools.guides.assist(self.assist.0, to_canvas(p), vec2(doc.width as f32, doc.height as f32), &mut self.assist.1) else {
+          continue;
+        };
         stroke.add(doc, p.x, p.y, pressure);
       }
       // QuickShape: holding still at the end snaps the stroke to the shape it looks like.

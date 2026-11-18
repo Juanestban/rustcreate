@@ -241,8 +241,13 @@ impl App {
   fn guides_section(&mut self, ui: &mut egui::Ui) {
     let (guides, i18n) = (&mut self.canvas.tools.guides, &self.i18n);
     ui.label(RichText::new(i18n.tr("ui-guide")).strong());
-    let kinds =
-      [(Kind::Off, "ui-guide-off"), (Kind::Grid, "ui-guide-grid"), (Kind::Isometric, "ui-guide-isometric"), (Kind::Symmetry, "ui-guide-symmetry")];
+    let kinds = [
+      (Kind::Off, "ui-guide-off"),
+      (Kind::Grid, "ui-guide-grid"),
+      (Kind::Isometric, "ui-guide-isometric"),
+      (Kind::Perspective, "ui-guide-perspective"),
+      (Kind::Symmetry, "ui-guide-symmetry"),
+    ];
     let name = |kind: Kind| kinds.iter().find(|(k, _)| *k == kind).map_or(String::new(), |(_, id)| i18n.tr(id));
     egui::ComboBox::from_id_salt("guide").selected_text(name(guides.kind)).show_ui(ui, |ui| {
       for (kind, id) in kinds {
@@ -251,6 +256,13 @@ impl App {
     });
     match guides.kind {
       Kind::Off => return,
+      Kind::Perspective => {
+        ui.horizontal(|ui| {
+          for points in 1..=3 {
+            ui.selectable_value(&mut guides.points, points, i18n.tr_args("ui-guide-points", &[("count", points.into())]));
+          }
+        });
+      }
       Kind::Grid | Kind::Isometric => {
         ui.horizontal(|ui| {
           ui.label(i18n.tr("ui-guide-spacing"));
@@ -283,6 +295,7 @@ impl App {
       }
     }
     ui.checkbox(&mut guides.assist, i18n.tr("ui-guide-assist")).on_hover_text(i18n.tr("ui-guide-assist-help"));
+    ui.toggle_value(&mut guides.editing, i18n.tr("ui-guide-edit")).on_hover_text(i18n.tr("ui-guide-edit-help"));
   }
 
   /// Bucket and gradient options.

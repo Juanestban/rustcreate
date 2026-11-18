@@ -179,7 +179,7 @@ ui-symmetry-quadrant = Quadrant
 ui-symmetry-radial = Radial
 ui-symmetry-copies = copies
 ui-guide-assist = Drawing Assist
-ui-guide-assist-help = Grid: strokes keep to the grid's directions. Symmetry: strokes are mirrored.
+ui-guide-assist-help = Grid and perspective: strokes keep to the guide's lines. Symmetry: strokes are mirrored.
 ui-brush-import = Import…
 ui-brush-import-help = Add brushes you own from Procreate (.brushset, .brush) or Photoshop (.abr) to My brushes.
 ui-brush-import-filter = Brushes
@@ -188,3 +188,10 @@ ui-tip-imported = Imported
 ui-grain-imported = Imported
 ui-color-tooltip = Color · drag onto the canvas to fill an area
 ui-brush-motion-filter = Motion filtering
+ui-guide-perspective = Perspective
+ui-guide-points = { $count ->
+    [one] 1 point
+   *[other] { $count } points
+}
+ui-guide-edit = Edit guide
+ui-guide-edit-help = While on, drag the guide's points on the canvas (vanishing points, or the center); painting is paused.

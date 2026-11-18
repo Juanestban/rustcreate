@@ -179,7 +179,7 @@ ui-symmetry-quadrant = Cuadrantes
 ui-symmetry-radial = Radial
 ui-symmetry-copies = copias
 ui-guide-assist = Asistente de dibujo
-ui-guide-assist-help = Cuadrícula: los trazos siguen las direcciones de la cuadrícula. Simetría: los trazos se reflejan.
+ui-guide-assist-help = Cuadrícula y perspectiva: los trazos siguen las líneas de la guía. Simetría: los trazos se reflejan.
 ui-brush-import = Importar…
 ui-brush-import-help = Añade a Mis pinceles los pinceles que tengas de Procreate (.brushset, .brush) o Photoshop (.abr).
 ui-brush-import-filter = Pinceles
@@ -188,3 +188,10 @@ ui-tip-imported = Importada
 ui-grain-imported = Importado
 ui-color-tooltip = Color · arrástralo al lienzo para rellenar una zona
 ui-brush-motion-filter = Filtrado de movimiento
+ui-guide-perspective = Perspectiva
+ui-guide-points = { $count ->
+    [one] 1 punto
+   *[other] { $count } puntos
+}
+ui-guide-edit = Editar guía
+ui-guide-edit-help = Mientras está activo, arrastra los puntos de la guía en el lienzo (los puntos de fuga o el centro); no se pinta.
