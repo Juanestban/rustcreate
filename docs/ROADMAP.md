@@ -13,11 +13,10 @@
   Windows Ink (pressure, eraser end, barrel button). Settings (language, theme, update checks)
   and the "New canvas" dialog. A native error dialog when no DX12/Vulkan GPU is found. **All
   v0.1 features are in.** Phase 2 started: Smudge tool, end taper, pulled-string stabilizer, brush tips and grains,
-  Brush Studio.
+  Brush Studio, the brush library with saved brushes and a brush per tool.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: the brush library by
-  category; paint bucket and gradient; QuickShape; color disc, palettes and harmony; drawing
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 2 order: paint bucket and gradient; QuickShape; color disc, palettes and harmony; drawing
   guides; `.brushset`/`.abr` import.
 
 ## Phase 0 — Foundation
@@ -69,13 +68,16 @@
 
 - [x] End taper: the tail is re-stamped thinner when the stroke ends
 
-- [ ] Full brush library by category (Sketching, Inking, Drawing, Painting, Artistic,
-      Calligraphy, Airbrushing, Textures, Abstract, Charcoals, Elements, Spraypaints…)
+- [x] Brush library by category: 20 original brushes in Sketching, Inking, Painting,
+      Airbrushing and Textures, plus My brushes (duplicate, rename, delete); previews painted by
+      the engine; each tool (paint, smudge, erase) keeps its own brush
+- [x] Edited and new brushes saved to `brushes.json` (only the differences from the built-ins)
+- [ ] More categories and brushes (Calligraphy, Abstract, Elements…), import/export of brush sets
 - [x] Brush Studio: every parameter (shape, grain, dynamics, stroke), live preview painted by
       the engine, reset
 - [x] Procedurally generated tips (round, square, chalk, bristles, splatter) and grains (paper,
       canvas, noise), all original (ADR 0006); rotation, follow-the-stroke, scatter, size jitter
-- [ ] Pen tilt in the brush dynamics; save edited and new brushes
+- [ ] Pen tilt in the brush dynamics
 - [x] Smudge tool (`S`): patch smudging with the brush's shape and opacity, pressure-aware
 - [ ] Wet mixing (paint brushes that pick up and blend canvas color)
 - [x] Stabilization: StreamLine plus a pulled-string stabilizer; strokes catch up with the

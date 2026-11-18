@@ -5,7 +5,8 @@
 use std::sync::OnceLock;
 
 /// The shape a dab stamps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Tip {
   /// A disc with a soft edge set by the brush's hardness.
   #[default]
@@ -42,7 +43,8 @@ impl Tip {
 }
 
 /// A paper texture the paint catches on, fixed to the canvas (like real paper under a pencil).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Grain {
   #[default]
   None,

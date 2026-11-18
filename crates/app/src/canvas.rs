@@ -156,9 +156,10 @@ impl Canvas {
       && response.hovered()
       && let Some(origin) = origin
     {
-      let (brush, color, tool) = self.tools.current();
-      // Flipping the pen to its eraser end erases with the same brush.
+      let (_, color, tool) = self.tools.current();
+      // Flipping the pen to its eraser end erases with the eraser's brush.
       let tool = if pen.eraser { Tool::Eraser } else { tool };
+      let brush = self.tools.brush_for(tool);
       let pressure = moves.first().map_or(self.pen.unwrap_or(1.0), |&(_, pressure)| pressure);
       let stroke = match tool {
         Tool::Smudge => doc.begin_smudge(brush),

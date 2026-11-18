@@ -2,6 +2,7 @@
 
 mod canvas;
 mod i18n;
+mod library;
 mod pen;
 mod settings;
 mod tools;
@@ -71,6 +72,10 @@ pub(crate) struct App {
   confirm: Option<Pending>,
   /// Brush Studio is open, on this section, with this preview.
   studio: bool,
+  /// The category the brushes panel shows; `None` follows the current brush.
+  brush_category: Option<usize>,
+  /// Brush previews in the library, by brush id, with the brush and theme they show.
+  thumbnails: std::collections::HashMap<String, (rustcreate_core::Brush, bool, egui::TextureHandle)>,
   studio_section: ui::studio::Section,
   preview: Option<ui::studio::Preview>,
   settings: Settings,
@@ -95,7 +100,8 @@ impl App {
     let settings = Settings::load();
     let doc = Document::new(settings.canvas.0, settings.canvas.1);
     let render_state = cc.wgpu_render_state.clone().expect("eframe runs on wgpu (ADR 0001)");
-    let canvas = Canvas::new(&render_state, &doc);
+    let mut canvas = Canvas::new(&render_state, &doc);
+    canvas.tools.library = library::Library::load();
     pen::install(cc);
     ui::theme::install(&cc.egui_ctx);
     cc.egui_ctx.set_theme(theme_preference(settings.theme));
@@ -114,6 +120,8 @@ impl App {
       hidden: false,
       confirm: None,
       studio: false,
+      brush_category: None,
+      thumbnails: Default::default(),
       studio_section: Default::default(),
       preview: None,
       settings,
@@ -370,6 +378,10 @@ impl eframe::App for App {
       self.brush_studio(&ctx);
     }
     self.dialogs(&ctx);
+    // Not mid-drag, so a size slider being dragged saves once at the end.
+    if !ctx.input(|i| i.pointer.any_down()) {
+      self.canvas.tools.library.save_if_changed();
+    }
   }
 }
 

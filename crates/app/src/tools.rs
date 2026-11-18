@@ -4,9 +4,8 @@
 use eframe::egui::{InputState, Key, Modifiers};
 use rustcreate_core::{Brush, Document};
 
-/// v0.1 brushes, in Shift+B order, with their name tokens.
-pub const BRUSHES: [(&str, Brush); 3] =
-  [("ui-brush-pencil", Brush::pencil()), ("ui-brush-ink", Brush::ink()), ("ui-brush-airbrush", Brush::airbrush())];
+use crate::library::Library;
+
 const MIN_SIZE: f32 = 1.0;
 const MAX_SIZE: f32 = 1000.0;
 const RECENT_COLORS: usize = 10;
@@ -20,11 +19,8 @@ pub enum Tool {
 }
 
 pub struct Tools {
-  /// Each brush keeps its own size and opacity, like Procreate.
-  pub brushes: [Brush; 3],
-  pub selected: usize,
-  /// shortcut: the three tools share the selected brush; Procreate gives each its own, split it
-  /// when the brush library grows (Phase 2).
+  /// Every brush keeps its own size and opacity, and each tool its own brush, like Procreate.
+  pub library: Library,
   pub tool: Tool,
   /// The eyedropper (I): the next press picks a color, then the brush comes back.
   pub picking: bool,
@@ -40,8 +36,7 @@ pub struct Tools {
 impl Default for Tools {
   fn default() -> Self {
     Self {
-      brushes: BRUSHES.map(|(_, brush)| brush),
-      selected: 1,
+      library: Library::default(),
       tool: Tool::Brush,
       picking: false,
       hand: false,
@@ -55,11 +50,26 @@ impl Default for Tools {
 impl Tools {
   /// The brush, color and mode a new stroke uses.
   pub fn current(&self) -> (Brush, [u8; 3], Tool) {
-    (self.brushes[self.selected], self.primary, self.tool)
+    (self.brush_for(self.tool), self.primary, self.tool)
+  }
+
+  /// The brush `tool` paints with.
+  pub fn brush_for(&self, tool: Tool) -> Brush {
+    self.library.entries[self.library.selection[tool as usize]].brush
+  }
+
+  /// The library index of the current tool's brush.
+  pub fn selected(&self) -> usize {
+    self.library.selection[self.tool as usize]
+  }
+
+  pub fn select(&mut self, index: usize) {
+    self.library.selection[self.tool as usize] = index;
   }
 
   pub fn brush_mut(&mut self) -> &mut Brush {
-    &mut self.brushes[self.selected]
+    let index = self.selected();
+    &mut self.library.entries[index].brush
   }
 
   /// Remembers the color a stroke starts with, for the color panel's history.
@@ -74,8 +84,8 @@ impl Tools {
   /// progress. egui ignores extra Shift/Alt, so the longer combinations are checked first.
   pub fn shortcuts(&mut self, input: &mut InputState, doc: &mut Document, painting: bool) {
     if input.consume_key(Modifiers::SHIFT, Key::B) {
-      self.selected = (self.selected + 1) % self.brushes.len();
       (self.tool, self.hand) = (Tool::Brush, false);
+      self.select(self.library.next_in_category(self.selected()));
     }
     if input.consume_key(Modifiers::NONE, Key::B) {
       (self.tool, self.hand) = (Tool::Brush, false);
@@ -189,7 +199,7 @@ mod tests {
     press(&mut tools, &mut doc, Modifiers::NONE, Key::D);
     assert_eq!(tools.current().1, [0, 0, 0]);
     press(&mut tools, &mut doc, Modifiers::SHIFT, Key::B);
-    assert_eq!(tools.current().0.size, Brush::airbrush().size, "Shift+B cycles to the airbrush");
+    assert_eq!(tools.current().0.size, 5.0, "Shift+B: the next inking brush, the Fineliner");
   }
 
   #[test]

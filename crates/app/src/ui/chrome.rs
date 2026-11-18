@@ -3,14 +3,16 @@
 //! with the size and opacity sliders, the eyedropper and undo/redo, and the floating panels the
 //! top bar opens.
 
-use eframe::egui::{self, Align, Align2, Color32, Frame, Layout, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2, vec2};
+use eframe::egui::{self, Align, Align2, Color32, Frame, Layout, Margin, Pos2, RichText, Sense, Stroke, Vec2, vec2};
 use rustcreate_core::BlendMode;
 
 use super::icons::{self, Icon};
+use super::studio;
 use super::theme;
 use crate::i18n::Language;
+use crate::library::{CATEGORIES, MINE, Name};
 use crate::settings::Theme;
-use crate::tools::{BRUSHES, Tool};
+use crate::tools::Tool;
 use crate::{App, Pending};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +77,7 @@ impl App {
 
   fn toggle(&mut self, popover: Popover) {
     self.popover = if self.popover == Some(popover) { None } else { Some(popover) };
+    self.brush_category = None;
   }
 
   fn popover_button(&mut self, ui: &mut egui::Ui, icon: Icon, popover: Popover, tooltip: &str) {
@@ -148,7 +151,11 @@ impl App {
     egui::Area::new(egui::Id::unique("popover")).order(egui::Order::Foreground).fixed_pos(anchor).pivot(pivot).show(ctx, |ui| {
       let palette = theme::palette(ui);
       Frame::popup(ui.style()).fill(palette.panel).corner_radius(theme::PANEL_RADIUS).inner_margin(Margin::same(12)).show(ui, |ui| {
-        ui.set_width(if popover == Popover::Color { 240.0 } else { 280.0 });
+        ui.set_width(match popover {
+          Popover::Color => 240.0,
+          Popover::Brushes => 380.0,
+          _ => 280.0,
+        });
         match popover {
           Popover::Actions => self.actions_panel(ui),
           Popover::Brushes => self.brushes_panel(ui),
@@ -211,35 +218,87 @@ impl App {
     ui.label(RichText::new(format!("rustcreate {}", env!("CARGO_PKG_VERSION"))).small().color(theme::palette(ui).muted));
   }
 
+  /// The brush library: categories on the left, the category's brushes on the right with
+  /// previews painted by the engine. Picking a brush sets it for the current tool.
   fn brushes_panel(&mut self, ui: &mut egui::Ui) {
     self.title(ui, "ui-brushes");
     let palette = theme::palette(ui);
-    for (index, (name, _)) in BRUSHES.iter().enumerate() {
-      let selected = self.canvas.tools.selected == index;
-      let brush = self.canvas.tools.brushes[index];
-      let response = Frame::NONE
-        .fill(if selected { palette.selected } else { Color32::TRANSPARENT })
-        .corner_radius(6)
-        .inner_margin(Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-          ui.set_width(ui.available_width());
-          ui.horizontal(|ui| {
-            ui.label(RichText::new(self.i18n.tr(name)).strong());
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-              ui.label(RichText::new(format!("{} px", brush.size.round())).color(palette.muted));
-            });
-          });
-          brush_preview(ui, brush, palette.ink);
+    let selected = self.canvas.tools.selected();
+    let category = *self.brush_category.get_or_insert(self.canvas.tools.library.entries[selected].category);
+    ui.horizontal_top(|ui| {
+      ui.vertical(|ui| {
+        ui.set_width(118.0);
+        for (index, id) in CATEGORIES.iter().enumerate() {
+          if ui.selectable_label(category == index, self.i18n.tr(id)).clicked() {
+            self.brush_category = Some(index);
+          }
+        }
+      });
+      ui.separator();
+      ui.vertical(|ui| {
+        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+          let indices: Vec<usize> =
+            (0..self.canvas.tools.library.entries.len()).filter(|&i| self.canvas.tools.library.entries[i].category == category).collect();
+          if indices.is_empty() {
+            ui.label(RichText::new(self.i18n.tr("ui-brushes-mine-empty")).color(palette.muted));
+          }
+          for index in indices {
+            let thumbnail = self.thumbnail(ui, index);
+            let response = Frame::NONE
+              .fill(if index == selected { palette.selected } else { Color32::TRANSPARENT })
+              .corner_radius(6)
+              .inner_margin(Margin::symmetric(8, 4))
+              .show(ui, |ui| {
+                ui.set_width(220.0);
+                ui.label(RichText::new(self.brush_name(index)).strong());
+                ui.add(egui::Image::new(&thumbnail).fit_to_exact_size(vec2(220.0, 44.0)));
+              });
+            if ui.interact(response.response.rect, ui.scope_id().with(("brush", index)), Sense::click()).clicked() {
+              self.canvas.tools.select(index);
+            }
+          }
         });
-      if ui.interact(response.response.rect, ui.scope_id().with(("brush", index)), Sense::click()).clicked() {
-        self.canvas.tools.selected = index;
-      }
-    }
-
+      });
+    });
     ui.separator();
-    if ui.add(egui::Button::new(self.i18n.tr("ui-studio")).min_size(vec2(ui.available_width(), 30.0))).clicked() {
-      self.studio = true;
-      self.popover = None;
+    ui.horizontal(|ui| {
+      if icons::button(ui, Icon::Duplicate, false, true, &self.i18n.tr("ui-brush-duplicate")).clicked() {
+        let name = self.i18n.tr_args("ui-brush-copy-name", &[("name", self.brush_name(selected).into())]);
+        let copy = self.canvas.tools.library.duplicate(selected, name);
+        self.canvas.tools.select(copy);
+        self.brush_category = Some(MINE);
+      }
+      let custom = !self.canvas.tools.library.is_builtin(selected);
+      if icons::button(ui, Icon::Trash, false, custom, &self.i18n.tr("ui-brush-delete")).clicked() {
+        self.canvas.tools.library.delete(selected);
+      }
+      if ui.button(self.i18n.tr("ui-studio")).clicked() {
+        self.studio = true;
+        self.popover = None;
+      }
+    });
+  }
+
+  /// A brush's display name: its translated token, or what the user called it.
+  pub(crate) fn brush_name(&self, index: usize) -> String {
+    match &self.canvas.tools.library.entries[index].name {
+      Name::Token(id) => self.i18n.tr(id),
+      Name::Custom(name) => name.clone(),
+    }
+  }
+
+  /// The engine-painted preview of a library brush, re-rendered when it or the theme changes.
+  fn thumbnail(&mut self, ui: &egui::Ui, index: usize) -> egui::TextureHandle {
+    let entry = &self.canvas.tools.library.entries[index];
+    let dark = ui.visuals().dark_mode;
+    match self.thumbnails.get(&entry.id) {
+      Some((brush, was_dark, texture)) if *brush == entry.brush && *was_dark == dark => texture.clone(),
+      _ => {
+        let image = studio::render(entry.brush, theme::palette(ui).ink, (256, 52));
+        let texture = ui.ctx().load_texture(format!("brush-{}", entry.id), image, egui::TextureOptions::LINEAR);
+        self.thumbnails.insert(entry.id.clone(), (entry.brush, dark, texture.clone()));
+        texture
+      }
     }
   }
 
@@ -373,19 +432,4 @@ impl App {
       });
     }
   }
-}
-
-/// A short S-shaped sample stroke showing the brush's width and softness.
-fn brush_preview(ui: &mut egui::Ui, brush: rustcreate_core::Brush, ink: Color32) {
-  let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
-  let width = brush.size.clamp(1.0, 14.0);
-  let points: Vec<Pos2> = (0..=40)
-    .map(|i| {
-      let t = i as f32 / 40.0;
-      Pos2::new(rect.left() + 8.0 + t * (rect.width() - 16.0), rect.center().y + (t * std::f32::consts::TAU).sin() * 6.0)
-    })
-    .collect();
-  let alpha = if brush.hardness < 0.5 { 0.45 } else { 1.0 } * brush.opacity;
-  ui.painter().add(egui::Shape::line(points, Stroke::new(width, ink.gamma_multiply(alpha))));
-  let _ = Rect::NOTHING;
 }

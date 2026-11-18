@@ -12,7 +12,9 @@ use std::collections::{HashMap, HashSet};
 use crate::tip::{self, Grain, Tip};
 use crate::{Document, TILE};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Serializable for saved brush libraries; fields missing from older files take the defaults.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Brush {
   /// Diameter in canvas pixels at full pressure.
   pub size: f32,
@@ -58,6 +60,12 @@ pub struct Brush {
   pub grain_scale: f32,
   /// 0..=1, how much the grain holds paint back.
   pub grain_depth: f32,
+}
+
+impl Default for Brush {
+  fn default() -> Self {
+    Self::ink()
+  }
 }
 
 impl Brush {

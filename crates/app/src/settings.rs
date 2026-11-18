@@ -52,8 +52,13 @@ impl Settings {
   }
 }
 
-/// `%APPDATA%\rustcreate`, `~/Library/Application Support/rustcreate` or `$XDG_CONFIG_HOME/rustcreate`.
 fn path() -> Option<PathBuf> {
+  config_file("settings.json")
+}
+
+/// `name` in `%APPDATA%\rustcreate`, `~/Library/Application Support/rustcreate` or
+/// `$XDG_CONFIG_HOME/rustcreate`.
+pub fn config_file(name: &str) -> Option<PathBuf> {
   let base = if cfg!(windows) {
     std::env::var_os("APPDATA").map(PathBuf::from)
   } else if cfg!(target_os = "macos") {
@@ -61,7 +66,7 @@ fn path() -> Option<PathBuf> {
   } else {
     std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::home_dir().map(|home| home.join(".config")))
   };
-  Some(base?.join("rustcreate").join("settings.json"))
+  Some(base?.join("rustcreate").join(name))
 }
 
 #[cfg(test)]

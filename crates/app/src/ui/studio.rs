@@ -6,7 +6,7 @@ use rustcreate_core::{Brush, Document, Grain, Tip};
 
 use super::theme;
 use crate::App;
-use crate::tools::BRUSHES;
+use crate::library::Name;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Section {
@@ -46,8 +46,7 @@ fn grain_name(grain: Grain) -> &'static str {
 }
 
 /// An S-curve that goes light → heavy → light, so pressure, taper and texture all show.
-fn render(brush: Brush, ink: Color32) -> ColorImage {
-  let (w, h) = PREVIEW;
+pub fn render(brush: Brush, ink: Color32, (w, h): (u32, u32)) -> ColorImage {
   let mut doc = Document::new(w, h);
   // Big brushes would only show a blob: scale them to fit the strip.
   let brush = Brush { size: brush.size.min(h as f32 * 0.45), ..brush };
@@ -69,12 +68,18 @@ impl App {
     if !self.studio {
       return;
     }
-    let index = self.canvas.tools.selected;
+    let index = self.canvas.tools.selected();
     let mut open = true;
-    let title = format!("{} — {}", self.i18n.tr("ui-studio"), self.i18n.tr(BRUSHES[index].0));
+    let title = format!("{} — {}", self.i18n.tr("ui-studio"), self.brush_name(index));
     egui::Window::new(title).id(egui::Id::unique("brush-studio")).open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
       ui.set_width(360.0);
       self.studio_preview(ui);
+      if let Name::Custom(name) = &mut self.canvas.tools.library.entries[index].name {
+        ui.horizontal(|ui| {
+          ui.label(self.i18n.tr("ui-studio-name"));
+          ui.text_edit_singleline(name);
+        });
+      }
       ui.add_space(6.0);
       ui.horizontal(|ui| {
         for (section, id) in [
@@ -165,19 +170,22 @@ impl App {
         }
       });
       ui.separator();
-      if ui.button(self.i18n.tr("ui-studio-reset")).clicked() {
-        self.canvas.tools.brushes[index] = BRUSHES[index].1;
+      // Built-ins go back to how they ship; the user's own brushes have nothing to reset to.
+      if let Some(original) = self.canvas.tools.library.original(index)
+        && ui.add_enabled(original != self.canvas.tools.library.entries[index].brush, egui::Button::new(self.i18n.tr("ui-studio-reset"))).clicked()
+      {
+        self.canvas.tools.library.entries[index].brush = original;
       }
     });
     self.studio &= open;
   }
 
   fn studio_preview(&mut self, ui: &mut egui::Ui) {
-    let brush = self.canvas.tools.brushes[self.canvas.tools.selected];
+    let brush = self.canvas.tools.current().0;
     let palette = theme::palette(ui);
     let dark = ui.visuals().dark_mode;
     if self.preview.as_ref().is_none_or(|p| p.brush != brush || p.dark != dark) {
-      let image = render(brush, palette.ink);
+      let image = render(brush, palette.ink, PREVIEW);
       let texture = ui.ctx().load_texture("brush-preview", image, TextureOptions::LINEAR);
       self.preview = Some(Preview { brush, dark, texture });
     }
