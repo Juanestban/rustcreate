@@ -5,11 +5,12 @@
 - **Done:** project foundation (licenses, docs, ADRs 0001–0006, graphify setup), app icon,
   CI and release packaging copied from archi-games. App skeleton: eframe window with the icon,
   system dark/light theme, Fluent `en`/`es`, updater (startup + every 5 h, banner, verified
-  install). `core`: tiled layers, layer stack operations, blend modes and undo/redo history.
+  install). `core`: tiled layers, layer stack operations, blend modes, undo/redo history, `.rcreate`
+  save/open and PNG export.
 - **Not verified yet:** Windows build, MSI packaging and the `.ico` (`build.rs`) only run on
   Windows/CI; the first push to GitHub will exercise them.
-- **Next:** `.rcreate` save/open and PNG export in `crates/core`, then create `crates/render`
-  (wgpu canvas) — the crate is added with its first real code.
+- **Next:** create `crates/render`: wgpu canvas sharing eframe's device, zoom/pan/rotate, then
+  the brush engine.
 
 ## Phase 0 — Foundation
 
@@ -28,7 +29,7 @@
       Darken, Lighten, Add, Color Dodge, Color Burn), with a CPU reference compositor
       (`core::blend`) that merge down uses and the GPU shaders must match
 - [x] History: copy-on-write tile snapshots, 250 steps, 2 GB memory cap
-- [ ] `.rcreate` save/open (atomic save), PNG export
+- [x] `.rcreate` save/open (atomic save, validated on open, thumbnail), PNG export
 
 ### Render (`crates/render`)
 - [ ] wgpu canvas sharing eframe's device (paint callback)

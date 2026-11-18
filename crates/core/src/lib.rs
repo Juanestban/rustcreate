@@ -1,11 +1,13 @@
 //! The document model: a canvas of tiled RGBA8 raster layers with undo (ADR 0005). No GPU here.
 
 pub mod blend;
+mod file;
 mod history;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub use file::{FORMAT, FileError};
 pub use history::History;
 use history::Snapshot;
 
@@ -19,7 +21,8 @@ pub const MAX_SIDE: u32 = 16384;
 /// document and its history and copied on write.
 pub type Tile = Arc<[u8]>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum BlendMode {
   #[default]
   Normal,
