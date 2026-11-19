@@ -38,10 +38,55 @@ fn hard_light(cs: vec3<f32>, cd: vec3<f32>) -> vec3<f32> {
   return select(cd + s - cd * s, cd * 2.0 * cs, cs <= vec3<f32>(0.5));
 }
 
+// Color dodge: 0 where the backdrop is black, else 1 where the source is white.
+fn dodge(cs: vec3<f32>, cd: vec3<f32>) -> vec3<f32> {
+  let one = vec3<f32>(1.0);
+  let r = min(cd / max(one - cs, vec3<f32>(1e-6)), one);
+  return select(select(r, one, cs >= one), vec3<f32>(0.0), cd <= vec3<f32>(0.0));
+}
+
+// Color burn: 1 where the backdrop is white, else 0 where the source is black.
+fn burn(cs: vec3<f32>, cd: vec3<f32>) -> vec3<f32> {
+  let one = vec3<f32>(1.0);
+  let r = one - min((one - cd) / max(cs, vec3<f32>(1e-6)), one);
+  return select(select(r, vec3<f32>(0.0), cs <= vec3<f32>(0.0)), one, cd >= one);
+}
+
+fn lum(c: vec3<f32>) -> f32 {
+  return dot(c, vec3<f32>(0.3, 0.59, 0.11));
+}
+
+fn sat(c: vec3<f32>) -> f32 {
+  return max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
+}
+
+// The color with luminosity `l`, pulled back into gamut keeping its luminosity.
+fn set_lum(color: vec3<f32>, l: f32) -> vec3<f32> {
+  var c = color + (l - lum(color));
+  let m = lum(c);
+  let n = min(min(c.r, c.g), c.b);
+  let x = max(max(c.r, c.g), c.b);
+  if n < 0.0 {
+    c = m + (c - m) * m / (m - n);
+  }
+  if x > 1.0 {
+    c = m + (c - m) * (1.0 - m) / (x - m);
+  }
+  return c;
+}
+
+// The color stretched so its saturation (max − min) is `s`, with its minimum at 0.
+fn set_sat(c: vec3<f32>, s: f32) -> vec3<f32> {
+  let n = min(min(c.r, c.g), c.b);
+  let x = max(max(c.r, c.g), c.b);
+  return select(vec3<f32>(0.0), (c - n) * s / max(x - n, 1e-6), x > n);
+}
+
 // Same order as `BlendMode`.
 fn blend(mode: u32, cs: vec3<f32>, cd: vec3<f32>) -> vec3<f32> {
   let one = vec3<f32>(1.0);
   let zero = vec3<f32>(0.0);
+  let half = vec3<f32>(0.5);
   switch mode {
     case 1u: { return cs * cd; }
     case 2u: { return cs + cd - cs * cd; }
@@ -49,16 +94,29 @@ fn blend(mode: u32, cs: vec3<f32>, cd: vec3<f32>) -> vec3<f32> {
     case 4u: { return min(cs, cd); }
     case 5u: { return max(cs, cd); }
     case 6u: { return min(cs + cd, one); }
-    case 7u: {
-      // Color dodge: 0 where the backdrop is black, else 1 where the source is white.
-      let r = min(cd / max(one - cs, vec3<f32>(1e-6)), one);
-      return select(select(r, one, cs >= one), zero, cd <= zero);
+    case 7u: { return dodge(cs, cd); }
+    case 8u: { return burn(cs, cd); }
+    case 9u: { return max(cs + cd - one, zero); }
+    case 10u: { return max(cd - cs, zero); }
+    case 11u: {
+      // Divide: 0 where the backdrop is black, else 1 where the source is black.
+      let r = min(cd / max(cs, vec3<f32>(1e-6)), one);
+      return select(select(r, one, cs <= zero), zero, cd <= zero);
     }
-    case 8u: {
-      // Color burn: 1 where the backdrop is white, else 0 where the source is black.
-      let r = one - min((one - cd) / max(cs, vec3<f32>(1e-6)), one);
-      return select(select(r, zero, cs <= zero), one, cd >= one);
+    case 12u: {
+      let d = select(sqrt(cd), ((16.0 * cd - 12.0) * cd + 4.0) * cd, cd <= vec3<f32>(0.25));
+      return select(cd + (2.0 * cs - 1.0) * (d - cd), cd - (1.0 - 2.0 * cs) * cd * (1.0 - cd), cs <= half);
     }
+    case 13u: { return hard_light(cs, cd); }
+    case 14u: { return select(dodge(2.0 * cs - 1.0, cd), burn(2.0 * cs, cd), cs <= half); }
+    case 15u: { return clamp(cd + 2.0 * cs - 1.0, zero, one); }
+    case 16u: { return select(max(cd, 2.0 * cs - 1.0), min(cd, 2.0 * cs), cs <= half); }
+    case 17u: { return abs(cs - cd); }
+    case 18u: { return cs + cd - 2.0 * cs * cd; }
+    case 19u: { return set_lum(set_sat(cs, sat(cd)), lum(cd)); }
+    case 20u: { return set_lum(set_sat(cd, sat(cs)), lum(cd)); }
+    case 21u: { return set_lum(cs, lum(cd)); }
+    case 22u: { return set_lum(cd, lum(cs)); }
     default: { return cs; }
   }
 }

@@ -54,6 +54,50 @@ pub enum BlendMode {
   Add,
   ColorDodge,
   ColorBurn,
+  // Added later, so files and the GPU keep the numbers above.
+  LinearBurn,
+  Subtract,
+  Divide,
+  SoftLight,
+  HardLight,
+  VividLight,
+  LinearLight,
+  PinLight,
+  Difference,
+  Exclusion,
+  Hue,
+  Saturation,
+  Color,
+  Luminosity,
+}
+
+impl BlendMode {
+  /// Every mode, in declaration order (the GPU's mode numbers).
+  pub const ALL: [BlendMode; 23] = [
+    BlendMode::Normal,
+    BlendMode::Multiply,
+    BlendMode::Screen,
+    BlendMode::Overlay,
+    BlendMode::Darken,
+    BlendMode::Lighten,
+    BlendMode::Add,
+    BlendMode::ColorDodge,
+    BlendMode::ColorBurn,
+    BlendMode::LinearBurn,
+    BlendMode::Subtract,
+    BlendMode::Divide,
+    BlendMode::SoftLight,
+    BlendMode::HardLight,
+    BlendMode::VividLight,
+    BlendMode::LinearLight,
+    BlendMode::PinLight,
+    BlendMode::Difference,
+    BlendMode::Exclusion,
+    BlendMode::Hue,
+    BlendMode::Saturation,
+    BlendMode::Color,
+    BlendMode::Luminosity,
+  ];
 }
 
 #[derive(Debug, Clone)]

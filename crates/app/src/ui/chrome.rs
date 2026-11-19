@@ -29,17 +29,35 @@ pub enum Popover {
   Adjust,
 }
 
-const BLEND_MODES: [(BlendMode, &str); 9] = [
+/// The layer blend modes in Photoshop's order; a separator goes before each index in
+/// `BLEND_GROUPS` (darken, lighten, contrast, compare, color).
+const BLEND_MODES: [(BlendMode, &str); 23] = [
   (BlendMode::Normal, "ui-blend-normal"),
-  (BlendMode::Multiply, "ui-blend-multiply"),
-  (BlendMode::Screen, "ui-blend-screen"),
-  (BlendMode::Overlay, "ui-blend-overlay"),
   (BlendMode::Darken, "ui-blend-darken"),
-  (BlendMode::Lighten, "ui-blend-lighten"),
-  (BlendMode::Add, "ui-blend-add"),
-  (BlendMode::ColorDodge, "ui-blend-color-dodge"),
+  (BlendMode::Multiply, "ui-blend-multiply"),
   (BlendMode::ColorBurn, "ui-blend-color-burn"),
+  (BlendMode::LinearBurn, "ui-blend-linear-burn"),
+  (BlendMode::Lighten, "ui-blend-lighten"),
+  (BlendMode::Screen, "ui-blend-screen"),
+  (BlendMode::ColorDodge, "ui-blend-color-dodge"),
+  (BlendMode::Add, "ui-blend-add"),
+  (BlendMode::Overlay, "ui-blend-overlay"),
+  (BlendMode::SoftLight, "ui-blend-soft-light"),
+  (BlendMode::HardLight, "ui-blend-hard-light"),
+  (BlendMode::VividLight, "ui-blend-vivid-light"),
+  (BlendMode::LinearLight, "ui-blend-linear-light"),
+  (BlendMode::PinLight, "ui-blend-pin-light"),
+  (BlendMode::Difference, "ui-blend-difference"),
+  (BlendMode::Exclusion, "ui-blend-exclusion"),
+  (BlendMode::Subtract, "ui-blend-subtract"),
+  (BlendMode::Divide, "ui-blend-divide"),
+  (BlendMode::Hue, "ui-blend-hue"),
+  (BlendMode::Saturation, "ui-blend-saturation"),
+  (BlendMode::Color, "ui-blend-color"),
+  (BlendMode::Luminosity, "ui-blend-luminosity"),
 ];
+
+const BLEND_GROUPS: [usize; 5] = [1, 5, 9, 15, 19];
 
 impl App {
   pub(crate) fn top_bar(&mut self, ui: &mut egui::Ui) {
@@ -595,7 +613,10 @@ impl App {
       ui.label(self.i18n.tr("ui-layer-blend"));
       let current = BLEND_MODES.iter().find(|(mode, _)| *mode == blend).map_or("ui-blend-normal", |(_, id)| id);
       egui::ComboBox::from_id_salt("blend").selected_text(self.i18n.tr(current)).show_ui(ui, |ui| {
-        for (mode, id) in BLEND_MODES {
+        for (i, (mode, id)) in BLEND_MODES.into_iter().enumerate() {
+          if BLEND_GROUPS.contains(&i) {
+            ui.separator();
+          }
           ui.selectable_value(&mut blend, mode, self.i18n.tr(id));
         }
       });

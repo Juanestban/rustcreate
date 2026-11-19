@@ -38,19 +38,9 @@ fn gpu_composite_matches_the_cpu_reference() {
     eprintln!("no GPU adapter: skipping");
     return;
   };
-  // 64 px wide: one 256-byte row, as copies require.
-  let (width, height) = (64, 9);
-  let modes = [
-    BlendMode::Normal,
-    BlendMode::Multiply,
-    BlendMode::Screen,
-    BlendMode::Overlay,
-    BlendMode::Darken,
-    BlendMode::Lighten,
-    BlendMode::Add,
-    BlendMode::ColorDodge,
-    BlendMode::ColorBurn,
-  ];
+  // 64 px wide: one 256-byte row, as copies require. One row per mode.
+  let modes = BlendMode::ALL;
+  let (width, height) = (64, modes.len() as u32);
   let mut doc = Document::new(width, height);
   // Bottom: a gradient of colors and alphas, one row per mode below.
   let bottom = doc.layer_mut(0).unwrap().tile_mut(0, 0);
