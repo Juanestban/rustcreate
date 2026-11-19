@@ -4,6 +4,7 @@ mod canvas;
 mod guides;
 mod i18n;
 mod library;
+mod log;
 mod palettes;
 mod pen;
 mod settings;
@@ -24,13 +25,7 @@ use ui::chrome::Popover;
 use updates::{Status, Updates};
 
 fn main() -> eframe::Result {
-  startup_log(None);
-  let default_hook = std::panic::take_hook();
-  std::panic::set_hook(Box::new(move |info| {
-    startup_log(Some(&format!("panic: {info}")));
-    default_hook(info);
-  }));
-  startup_log(Some(&format!("start: rustcreate {} on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS)));
+  log::start();
   update::clean_up();
   let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png")).expect("bundled icon is a PNG");
   let options = eframe::NativeOptions {
@@ -39,26 +34,10 @@ fn main() -> eframe::Result {
   };
   let result = eframe::run_native("rustcreate", options, Box::new(|cc| Ok(Box::new(App::new(cc)))));
   if let Err(error) = &result {
-    startup_log(Some(&format!("failed: {error}")));
+    log::line(&format!("failed: {error}"));
     startup_failed(error);
   }
   result
-}
-
-/// `rustcreate.log` next to the settings: the steps of the last start and any panic. A release
-/// build on Windows has no console, so this is what tells why a window never showed. `None`
-/// starts the file afresh.
-fn startup_log(line: Option<&str>) {
-  use std::io::Write;
-  let Some(path) = settings::config_file("rustcreate.log") else { return };
-  if let Some(dir) = path.parent() {
-    let _ = std::fs::create_dir_all(dir);
-  }
-  let file = std::fs::OpenOptions::new().create(true).write(true).append(line.is_some()).truncate(line.is_none()).open(path);
-  if let (Ok(mut file), Some(line)) = (file, line) {
-    let seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let _ = writeln!(file, "{seconds} {line}");
-  }
 }
 
 /// The window could not start, almost always for want of a DX12/Vulkan GPU (ADR 0001). A release
@@ -139,9 +118,9 @@ impl App {
     let doc = Document::new(settings.canvas.0, settings.canvas.1);
     let render_state = cc.wgpu_render_state.clone().expect("eframe runs on wgpu (ADR 0001)");
     let gpu = render_state.adapter.get_info();
-    startup_log(Some(&format!("gpu: {} ({:?}, driver {} {})", gpu.name, gpu.backend, gpu.driver, gpu.driver_info)));
+    log::line(&format!("gpu: {} ({:?}, {:?}, driver {} {})", gpu.name, gpu.backend, gpu.device_type, gpu.driver, gpu.driver_info));
     let mut canvas = Canvas::new(&render_state, &doc);
-    startup_log(Some("canvas ready"));
+    log::line("canvas ready");
     canvas.tools.library = library::Library::load();
     canvas.tools.quickshape = settings.quickshape;
     pen::install(cc);
@@ -431,8 +410,11 @@ impl App {
 impl eframe::App for App {
   fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
     let ctx = ui.ctx().clone();
-    if ctx.cumulative_frame_nr() == 0 {
-      startup_log(Some("first frame"));
+    let frame = ctx.cumulative_frame_nr();
+    log::ui_started(frame);
+    if frame == 0 {
+      // A second frame tells the log that the first one was painted and the window shown.
+      ctx.request_repaint();
     }
     // Closing the window with unsaved changes asks first.
     if ctx.input(|i| i.viewport().close_requested()) && !self.closing && self.dirty() {
@@ -468,6 +450,7 @@ impl eframe::App for App {
       self.canvas.tools.library.save_if_changed();
       self.palettes.save_if_changed();
     }
+    log::ui_finished();
   }
 }
 

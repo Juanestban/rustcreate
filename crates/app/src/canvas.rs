@@ -810,7 +810,10 @@ impl Canvas {
   /// the pen is flipped) paints at full pressure, turned like the tip. Tiny brushes get a cross.
   fn outline(&self, ui: &egui::Ui, rect: egui::Rect, view: View, over: bool) {
     let pen = crate::pen::buttons();
-    let (alt, dragging_color) = ui.input(|i| (i.modifiers.alt, egui::DragAndDrop::has_any_payload(ui.ctx())));
+    // Not inside `ui.input`: that holds the context's lock, which `has_any_payload` takes again;
+    // the first frame then never finished and the window (shown after it) never appeared.
+    let alt = ui.input(|i| i.modifiers.alt);
+    let dragging_color = egui::DragAndDrop::has_any_payload(ui.ctx());
     let tool = if pen.eraser { Tool::Eraser } else { self.tools.tool };
     let busy = self.transform.is_some()
       || self.tools.picking

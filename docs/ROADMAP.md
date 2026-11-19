@@ -20,10 +20,13 @@
   mixing, pen tilt, ColorDrop threshold, palette import/export, the guide saved in the file,
   Calligraphy/Abstract/Elements brushes, `.rcbrushes` sets and the brush outline. **Phase 2 is
   done.** Phase 3 started: selections, Free Transform, Alpha Lock, clipping masks, layer masks, adjustments, filters, all 23 blend modes, crop and canvas/image size, layer groups.
-- **Windows start-up fix:** the first Windows install ran with no window. Likely cause: FXC
-  (wgpu's DX12 compiler when DXC is not shipped) choking on the composite shader's loop; the
-  shader now has no loops. Each start writes `%APPDATA%\rustcreate\rustcreate.log` (steps,
-  GPU, panics). Waiting for a retest on Windows.
+- **Start-up freeze (fixed):** since the brush outline (v0.5.0) the first frame deadlocked: the
+  outline asked egui for a drag payload inside `ui.input`, which already held the context's lock.
+  eframe shows the window only after the first frame, so the app ran with no window on every
+  platform (a debug build panics after 10 s with "Failed to acquire RwLock read"). Earlier guesses
+  (FXC and the shader) were not the cause; the shader change stays as harmless FXC hardening, and a
+  panic on the main thread shows a dialog and ends the process. `%APPDATA%\rustcreate\rustcreate.log` records each run's steps, panics with
+  backtraces and UI stalls; the previous run stays in `rustcreate.previous.log`.
 - **Not verified yet:** MSI packaging and the `.ico` (`build.rs`) only run on Windows/CI.
 - **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 3: text layers next.
 

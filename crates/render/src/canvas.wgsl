@@ -87,38 +87,42 @@ fn blend(mode: u32, cs: vec3<f32>, cd: vec3<f32>) -> vec3<f32> {
   let one = vec3<f32>(1.0);
   let zero = vec3<f32>(0.0);
   let half = vec3<f32>(0.5);
+  // One return after the switch: FXC (DX12 without DXC) is strict about functions whose
+  // returns are all inside a `switch`.
+  var out = cs;
   switch mode {
-    case 1u: { return cs * cd; }
-    case 2u: { return cs + cd - cs * cd; }
-    case 3u: { return hard_light(cd, cs); }
-    case 4u: { return min(cs, cd); }
-    case 5u: { return max(cs, cd); }
-    case 6u: { return min(cs + cd, one); }
-    case 7u: { return dodge(cs, cd); }
-    case 8u: { return burn(cs, cd); }
-    case 9u: { return max(cs + cd - one, zero); }
-    case 10u: { return max(cd - cs, zero); }
+    case 1u: { out = cs * cd; }
+    case 2u: { out = cs + cd - cs * cd; }
+    case 3u: { out = hard_light(cd, cs); }
+    case 4u: { out = min(cs, cd); }
+    case 5u: { out = max(cs, cd); }
+    case 6u: { out = min(cs + cd, one); }
+    case 7u: { out = dodge(cs, cd); }
+    case 8u: { out = burn(cs, cd); }
+    case 9u: { out = max(cs + cd - one, zero); }
+    case 10u: { out = max(cd - cs, zero); }
     case 11u: {
       // Divide: 0 where the backdrop is black, else 1 where the source is black.
       let r = min(cd / max(cs, vec3<f32>(1e-6)), one);
-      return select(select(r, one, cs <= zero), zero, cd <= zero);
+      out = select(select(r, one, cs <= zero), zero, cd <= zero);
     }
     case 12u: {
       let d = select(sqrt(cd), ((16.0 * cd - 12.0) * cd + 4.0) * cd, cd <= vec3<f32>(0.25));
-      return select(cd + (2.0 * cs - 1.0) * (d - cd), cd - (1.0 - 2.0 * cs) * cd * (1.0 - cd), cs <= half);
+      out = select(cd + (2.0 * cs - 1.0) * (d - cd), cd - (1.0 - 2.0 * cs) * cd * (1.0 - cd), cs <= half);
     }
-    case 13u: { return hard_light(cs, cd); }
-    case 14u: { return select(dodge(2.0 * cs - 1.0, cd), burn(2.0 * cs, cd), cs <= half); }
-    case 15u: { return clamp(cd + 2.0 * cs - 1.0, zero, one); }
-    case 16u: { return select(max(cd, 2.0 * cs - 1.0), min(cd, 2.0 * cs), cs <= half); }
-    case 17u: { return abs(cs - cd); }
-    case 18u: { return cs + cd - 2.0 * cs * cd; }
-    case 19u: { return set_lum(set_sat(cs, sat(cd)), lum(cd)); }
-    case 20u: { return set_lum(set_sat(cd, sat(cs)), lum(cd)); }
-    case 21u: { return set_lum(cs, lum(cd)); }
-    case 22u: { return set_lum(cd, lum(cs)); }
-    default: { return cs; }
+    case 13u: { out = hard_light(cs, cd); }
+    case 14u: { out = select(dodge(2.0 * cs - 1.0, cd), burn(2.0 * cs, cd), cs <= half); }
+    case 15u: { out = clamp(cd + 2.0 * cs - 1.0, zero, one); }
+    case 16u: { out = select(max(cd, 2.0 * cs - 1.0), min(cd, 2.0 * cs), cs <= half); }
+    case 17u: { out = abs(cs - cd); }
+    case 18u: { out = cs + cd - 2.0 * cs * cd; }
+    case 19u: { out = set_lum(set_sat(cs, sat(cd)), lum(cd)); }
+    case 20u: { out = set_lum(set_sat(cd, sat(cs)), lum(cd)); }
+    case 21u: { out = set_lum(cs, lum(cd)); }
+    case 22u: { out = set_lum(cd, lum(cs)); }
+    default: {}
   }
+  return out;
 }
 
 @fragment
