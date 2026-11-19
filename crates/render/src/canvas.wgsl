@@ -29,32 +29,35 @@ struct LayerParams {
 @group(0) @binding(3) var base: texture_2d<f32>;
 @group(0) @binding(4) var mask: texture_2d<f32>;
 
-fn hard_light(cs: f32, cd: f32) -> f32 {
-  if cs <= 0.5 {
-    return cd * 2.0 * cs;
-  }
+// Written on whole RGB vectors with `select`, no loops or per-channel indexing: Windows'
+// default shader compiler (FXC, used when DXC is not shipped) can take minutes on a loop that
+// calls a `switch`, and the window only shows once this shader is built.
+
+fn hard_light(cs: vec3<f32>, cd: vec3<f32>) -> vec3<f32> {
   let s = 2.0 * cs - 1.0;
-  return cd + s - cd * s;
+  return select(cd + s - cd * s, cd * 2.0 * cs, cs <= vec3<f32>(0.5));
 }
 
 // Same order as `BlendMode`.
-fn blend(mode: u32, cs: f32, cd: f32) -> f32 {
+fn blend(mode: u32, cs: vec3<f32>, cd: vec3<f32>) -> vec3<f32> {
+  let one = vec3<f32>(1.0);
+  let zero = vec3<f32>(0.0);
   switch mode {
     case 1u: { return cs * cd; }
     case 2u: { return cs + cd - cs * cd; }
     case 3u: { return hard_light(cd, cs); }
     case 4u: { return min(cs, cd); }
     case 5u: { return max(cs, cd); }
-    case 6u: { return min(cs + cd, 1.0); }
+    case 6u: { return min(cs + cd, one); }
     case 7u: {
-      if cd <= 0.0 { return 0.0; }
-      if cs >= 1.0 { return 1.0; }
-      return min(cd / (1.0 - cs), 1.0);
+      // Color dodge: 0 where the backdrop is black, else 1 where the source is white.
+      let r = min(cd / max(one - cs, vec3<f32>(1e-6)), one);
+      return select(select(r, one, cs >= one), zero, cd <= zero);
     }
     case 8u: {
-      if cd >= 1.0 { return 1.0; }
-      if cs <= 0.0 { return 0.0; }
-      return 1.0 - min((1.0 - cd) / cs, 1.0);
+      // Color burn: 1 where the backdrop is white, else 0 where the source is black.
+      let r = one - min((one - cd) / max(cs, vec3<f32>(1e-6)), one);
+      return select(select(r, zero, cs <= zero), one, cd >= one);
     }
     default: { return cs; }
   }
@@ -78,17 +81,11 @@ fn composite(in: FullscreenOut) -> @location(0) vec4<f32> {
   }
   let da = d.a;
   let ra = sa + da - sa * da;
-  var out = vec4<f32>(0.0, 0.0, 0.0, ra);
-  for (var c = 0; c < 3; c++) {
-    // Clamped like the CPU reference: rounding can push a straight color just past 1.
-    let cs = min(s[c] / sa, 1.0);
-    var cd = 0.0;
-    if da > 0.0 {
-      cd = min(d[c] / da, 1.0);
-    }
-    out[c] = clamp((1.0 - sa) * d[c] + (1.0 - da) * s[c] + sa * da * blend(params.mode, cs, cd), 0.0, ra);
-  }
-  return out;
+  // Clamped like the CPU reference: rounding can push a straight color just past 1.
+  let cs = min(s.rgb / sa, vec3<f32>(1.0));
+  let cd = select(vec3<f32>(0.0), min(d.rgb / max(da, 1e-6), vec3<f32>(1.0)), da > 0.0);
+  let rgb = (1.0 - sa) * d.rgb + (1.0 - da) * s.rgb + sa * da * blend(params.mode, cs, cd);
+  return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(ra)), ra);
 }
 
 // ---- Display: the composited canvas transformed into the view, over a checkerboard. ----
