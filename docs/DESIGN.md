@@ -50,7 +50,7 @@ file; do not silently diverge.
 
 - Native format `.rcreate`: zip with `document.json`, a PNG per layer and a thumbnail
   ([ADR 0003](adr/0003-rcreate-file-format.md)).
-- Export PNG in v0.1; JPEG, PSD, GIF/MP4 (animation) later.
+- Export PNG in v0.1; JPEG and WebP from the File menu; GIF/MP4 with animation (Phase 4); PSD after v1.0 (technical debt).
 
 ## Input
 

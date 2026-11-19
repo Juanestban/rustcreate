@@ -95,6 +95,10 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Ctrl+O` | Open | ✅ |
 | `Ctrl+S` | Save | ✅ |
 | `Ctrl+Shift+S` | Save as | ✅ |
+| `Ctrl+Alt+S` | Save a copy | ✅ |
+| `Ctrl+W` | Close (asks to save first) | ✅ |
+| `F12` | Revert to the saved file | ✅ |
+| `Ctrl+Q` | Quit | ✅ |
 | `Ctrl+Alt+Shift+W` | Export PNG ("Export As") | ✅ |
 
 ## Animation (later)

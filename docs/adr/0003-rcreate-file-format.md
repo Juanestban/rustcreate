@@ -33,7 +33,7 @@ thumbnail.png        a small preview for file browsers and the start screen
 - Images are stored uncompressed inside the zip (`Stored`): PNG is already compressed.
 - Saving writes to a temporary file next to the target and renames it, so a crash never leaves
   a half-written document.
-- PSD import and export come later and do not change this format.
+- PSD import and export come after v1.0 (technical debt) and do not change this format.
 
 ## Consequences
 

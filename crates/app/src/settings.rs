@@ -28,11 +28,13 @@ pub struct Settings {
   pub canvas: (u32, u32),
   /// Holding still at the end of a stroke snaps it to a clean shape.
   pub quickshape: bool,
+  /// Files opened or saved lately, newest first (File > Open recent).
+  pub recent: Vec<PathBuf>,
 }
 
 impl Default for Settings {
   fn default() -> Self {
-    Self { language: None, theme: Theme::Dark, check_updates: true, canvas: (2048, 1536), quickshape: true }
+    Self { language: None, theme: Theme::Dark, check_updates: true, canvas: (2048, 1536), quickshape: true, recent: Vec::new() }
   }
 }
 
@@ -77,7 +79,14 @@ mod tests {
 
   #[test]
   fn round_trips_and_fills_missing_fields() {
-    let settings = Settings { language: Some(Language::Es), theme: Theme::Light, check_updates: false, canvas: (800, 600), quickshape: false };
+    let settings = Settings {
+      language: Some(Language::Es),
+      theme: Theme::Light,
+      check_updates: false,
+      canvas: (800, 600),
+      quickshape: false,
+      recent: vec!["a.rcreate".into()],
+    };
     let json = serde_json::to_string(&settings).unwrap();
     assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), settings);
     // An older file without the newer fields still loads.

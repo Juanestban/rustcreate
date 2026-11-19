@@ -10,6 +10,7 @@ rustcreate-core.workspace = true
 rustcreate-render.workspace = true
 eframe.workspace = true
 fluent-bundle.workspace = true
+image.workspace = true
 raw-window-handle.workspace = true
 reqwest.workspace = true
 rfd.workspace = true

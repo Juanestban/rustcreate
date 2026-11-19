@@ -38,8 +38,10 @@
 - **Text layers (2026-11-18):** `core::text` draws text with the system's fonts (fontdb +
   ab_glyph) into the layer; the text is kept on the layer and in the file, so it stays editable
   until a pixel edit rasterizes it.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 3: PSD import/export and
-  JPEG/WebP export next.
+- **File menu (2026-11-19):** the top left button opens Photoshop's File menu (recent files are
+  kept in the settings); PSD and `Brush.archive` moved to "Technical debt" for after v1.0.
+  **Phase 3 is done.**
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 4 (animation) next.
 
 ## Phase 0 — Foundation
 
@@ -92,7 +94,9 @@
 
 - [x] Brush library by category: 20 original brushes in Sketching, Inking, Painting,
       Airbrushing and Textures, plus My brushes (duplicate, rename, delete); previews painted by
-      the engine; each tool (paint, smudge, erase) keeps its own brush
+      the engine; each tool (paint, smudge, erase) keeps its own brush. Hard and Soft Eraser
+      (Airbrushing, full flow, no build-up) clear in one pass like Photoshop's eraser; the Hard
+      Eraser is the eraser's default
 - [x] Edited and new brushes saved to `brushes.json` (only the differences from the built-ins)
 - [x] Calligraphy and Abstract categories (8 new brushes); tip roundness for flat nibs and
       ribbons; rustcreate brush sets (`.rcbrushes`: every setting plus the images) exported per
@@ -143,8 +147,9 @@
 - [x] Import brushes the user owns: Procreate `.brushset`/`.brush` (shape and grain images)
       and Photoshop `.abr` v6+ (sampled tips, raw or PackBits) into My brushes; imported images
       kept in `brush-images/` next to the settings
-- Skipped: reading the rest of an imported brush's settings (Procreate `Brush.archive`, ABR
-  descriptors). They are closed binary formats; imported brushes keep their shape and grain.
+- Deferred to after v1.0 (see "Technical debt"): reading the rest of an imported brush's
+  settings (Procreate `Brush.archive`, ABR descriptors). Imported brushes keep their shape and
+  grain.
 
 ## Phase 3 — Photoshop-grade editing
 
@@ -174,7 +179,10 @@ The Photoshop features people use most, in this order:
 - [x] Text layers (T): system fonts, size, color, multi-line; click to add, click one to edit,
       drag to move; painting, filling, adjusting or transforming one rasterizes it (no shaping
       for complex scripts yet)
-- [ ] PSD import/export, JPEG/WebP export
+- [x] File menu (the top left button), like Photoshop's: New, Open, Open recent, Close,
+      Save, Save as, Save a copy, Revert, Place image (PNG/JPEG/WebP as a new layer, then Free
+      Transform), Export PNG/JPEG/WebP, Quit
+- PSD import/export: deferred to after v1.0 (see "Technical debt")
 
 Later: adjustment layers, warp/distort and liquify, motion blur and chromatic aberration,
 16-bit channels and color management (Display P3, ICC), TIFF export, reference window,
@@ -187,10 +195,27 @@ time-lapse recording.
 - [ ] Playback: loop, ping-pong, one-shot; frames per second
 - [ ] Export GIF, MP4, animated PNG, PNG sequence
 
-## Phase 5 — More platforms
+## Phase 5 — Home screen
+
+- [ ] A home screen before the canvas (also what File > Close goes back to)
+- [ ] New canvas from it: width and height in pixels, inches, cm or mm with resolution (DPI),
+      transparent or colored background, 8 or 16 bits per channel
+- [ ] Suggested size templates (screen, square, A4/Letter at 300 DPI, 4K, social posts…) and
+      the user's own saved sizes
+- [ ] Recent projects with a preview thumbnail (saved in the `.rcreate`), opened with one click;
+      pinned and last edited first
+- [ ] Several documents open at once (tabs), which makes File > Save all possible
+
+## Phase 6 — More platforms
 
 - [ ] Wintab pen input (older tablets)
 - [ ] macOS (Metal), Apple Pencil on iPad/iPhone
 - [ ] Android (Vulkan, stylus)
 - [ ] Linux (Wayland/X11 tablets)
 - [ ] Touch gestures: two-finger undo, three-finger redo, pinch zoom/rotate
+
+## Technical debt (after v1.0)
+
+- [ ] PSD import and export (layers, groups, masks, blend modes, text as pixels)
+- [ ] Reading the rest of imported brush settings: Procreate `Brush.archive` (a binary plist)
+      and ABR descriptors, mapped onto our brush settings

@@ -219,6 +219,64 @@ impl Document {
     Ok(())
   }
 
+  /// The whole visible picture as straight (not premultiplied) RGBA8, row by row: what other
+  /// image formats are encoded from.
+  pub fn flatten(&self) -> Vec<u8> {
+    let (width, height) = (self.width as usize, self.height as usize);
+    let mut out = vec![0; width * height * 4];
+    let (cols, rows) = self.tiles();
+    for ty in 0..rows {
+      for tx in 0..cols {
+        let Some(tile) = self.composite_tile(tx, ty) else { continue };
+        for row in 0..TILE as usize {
+          let y = ty as usize * TILE as usize + row;
+          if y >= height {
+            break;
+          }
+          for col in 0..TILE as usize {
+            let x = tx as usize * TILE as usize + col;
+            if x >= width {
+              break;
+            }
+            let p = &tile[(row * TILE as usize + col) * 4..][..4];
+            let a = p[3] as f32 / 255.0;
+            let straight = |c: u8| if a > 0.0 { (c as f32 / a).round().min(255.0) as u8 } else { 0 };
+            out[(y * width + x) * 4..][..4].copy_from_slice(&[straight(p[0]), straight(p[1]), straight(p[2]), p[3]]);
+          }
+        }
+      }
+    }
+    out
+  }
+
+  /// File > Place: a new layer named `name` above the active one holding an image (straight
+  /// RGBA8, `size` pixels) with its top left corner at `at`, cut to the canvas. One undo step.
+  pub fn add_image_layer(&mut self, name: &str, rgba: &[u8], size: (u32, u32), at: (i64, i64)) {
+    self.add_layer();
+    let (width, height) = (self.width as i64, self.height as i64);
+    let layer = &mut self.layers[self.active];
+    layer.name = name.to_owned();
+    for y in 0..size.1 as i64 {
+      let cy = at.1 + y;
+      if !(0..height).contains(&cy) {
+        continue;
+      }
+      for x in 0..size.0 as i64 {
+        let cx = at.0 + x;
+        let src = &rgba[((y * size.0 as i64 + x) * 4) as usize..][..4];
+        if !(0..width).contains(&cx) || src[3] == 0 {
+          continue;
+        }
+        let (cx, cy) = (cx as u32, cy as u32);
+        let tile = layer.tile_mut(cx / TILE, cy / TILE);
+        let p = (((cy % TILE) * TILE + cx % TILE) * 4) as usize;
+        let a = src[3] as u32;
+        let pre = |c: u8| ((c as u32 * a + 127) / 255) as u8;
+        tile[p..p + 4].copy_from_slice(&[pre(src[0]), pre(src[1]), pre(src[2]), src[3]]);
+      }
+    }
+  }
+
   /// The visible layers of one tile blended together (premultiplied), or `None` if no visible
   /// layer painted it.
   pub fn composite_tile(&self, tx: u32, ty: u32) -> Option<Vec<u8>> {
@@ -548,5 +606,31 @@ mod tests {
     let mut clear = [9, 9, 9, 0];
     unpremultiply(&mut clear);
     assert_eq!(clear, [0; 4]);
+  }
+}
+
+#[cfg(test)]
+mod place_tests {
+  use crate::Document;
+
+  #[test]
+  fn placed_images_flatten_back_to_their_pixels() {
+    let mut doc = Document::new(300, 10);
+    // 2×2: opaque red, half-transparent green, clear, opaque blue; partly off the right edge.
+    let image = [255, 0, 0, 255, 0, 200, 0, 128, 0, 0, 0, 0, 0, 0, 255, 255];
+    doc.add_image_layer("photo", &image, (2, 2), (299, 3));
+    assert_eq!(doc.layers()[1].name, "photo");
+    let flat = doc.flatten();
+    let at = |x: usize, y: usize| &flat[(y * 300 + x) * 4..][..4];
+    assert_eq!(at(299, 3), [255, 0, 0, 255]);
+    assert_eq!(at(299, 4), [0, 0, 0, 0], "clear stays clear");
+    assert_eq!(at(0, 0), [0, 0, 0, 0]);
+    doc.undo();
+    assert_eq!(doc.layers().len(), 1, "placing is one undo step");
+    // The half-transparent pixel keeps its color through premultiplying.
+    doc.add_image_layer("photo", &image, (2, 2), (0, 0));
+    let flat = doc.flatten();
+    let p = &flat[4..8];
+    assert!(p[1].abs_diff(200) <= 2 && p[3] == 128, "{p:?}");
   }
 }

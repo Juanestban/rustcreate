@@ -15,11 +15,12 @@ use crate::i18n::Language;
 use crate::library::{CATEGORIES, MINE, Name};
 use crate::settings::Theme;
 use crate::tools::{SelectKind, Tool};
-use crate::{App, Pending};
+use crate::{App, Export, Pending};
 use rustcreate_core::{GradientKind, Symmetry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Popover {
+  File,
   Actions,
   Brushes,
   Fill,
@@ -67,8 +68,7 @@ impl App {
       |ui| {
         ui.horizontal_centered(|ui| {
           ui.spacing_mut().item_spacing.x = 4.0;
-          let soon = self.i18n.tr("ui-coming-soon");
-          icons::button(ui, Icon::Gallery, false, false, &format!("{} · {soon}", self.i18n.tr("ui-gallery")));
+          self.popover_button(ui, Icon::Gallery, Popover::File, "ui-file");
           self.popover_button(ui, Icon::Actions, Popover::Actions, "ui-actions");
           ui.add_space(8.0);
           self.popover_button(ui, Icon::Adjustments, Popover::Adjust, "ui-adjustments");
@@ -217,7 +217,7 @@ impl App {
       return;
     }
     let (anchor, pivot) = match popover {
-      Popover::Actions => (Pos2::new(screen.left() + 10.0, screen.top() + theme::BAR_HEIGHT + 6.0), Align2::LEFT_TOP),
+      Popover::File | Popover::Actions => (Pos2::new(screen.left() + 10.0, screen.top() + theme::BAR_HEIGHT + 6.0), Align2::LEFT_TOP),
       _ => (Pos2::new(screen.right() - 10.0, screen.top() + theme::BAR_HEIGHT + 6.0), Align2::RIGHT_TOP),
     };
     egui::Area::new(egui::Id::unique("popover")).order(egui::Order::Foreground).fixed_pos(anchor).pivot(pivot).show(ctx, |ui| {
@@ -236,6 +236,7 @@ impl App {
           self.popover = None;
         }
         match popover {
+          Popover::File => self.file_panel(ui),
           Popover::Actions => self.actions_panel(ui),
           Popover::Brushes => self.brushes_panel(ui),
           Popover::Fill => self.fill_panel(ui),
@@ -253,28 +254,92 @@ impl App {
     ui.add_space(6.0);
   }
 
+  /// Photoshop's File menu: new, open (and recent files), close, save, save as, save a copy,
+  /// revert, place, export and quit.
+  fn file_panel(&mut self, ui: &mut egui::Ui) {
+    self.title(ui, "ui-file");
+    let item = |ui: &mut egui::Ui, text: String, shortcut: &str, enabled: bool| {
+      ui.add_enabled(enabled, egui::Button::new(text).shortcut_text(shortcut).min_size(vec2(ui.available_width(), 30.0))).clicked()
+    };
+    let mut close = true;
+    if item(ui, self.i18n.tr("ui-file-new"), "Ctrl+N", true) {
+      self.new_canvas = Some(self.settings.canvas);
+    } else if item(ui, self.i18n.tr("ui-file-open"), "Ctrl+O", true) {
+      self.request(Pending::Open(None));
+    } else {
+      close = false;
+    }
+    let muted = theme::palette(ui).muted;
+    egui::CollapsingHeader::new(self.i18n.tr("ui-file-recent")).id_salt("recent").show(ui, |ui| {
+      if self.settings.recent.is_empty() {
+        ui.label(RichText::new(self.i18n.tr("ui-file-recent-none")).color(muted));
+      }
+      for path in self.settings.recent.clone() {
+        let name = path.file_stem().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+        let response =
+          ui.add(egui::Button::new(name).frame(false).min_size(vec2(ui.available_width(), 26.0))).on_hover_text(path.display().to_string());
+        if response.clicked() {
+          self.request(Pending::Open(Some(path.clone())));
+          close = true;
+        }
+        response.context_menu(|ui| {
+          if ui.button(self.i18n.tr("ui-file-recent-remove")).clicked() {
+            self.forget(&path);
+            ui.close();
+          }
+        });
+      }
+    });
+    ui.separator();
+    let saved = self.path.is_some();
+    if item(ui, self.i18n.tr("ui-file-close"), "Ctrl+W", true) {
+      self.request(Pending::New(self.settings.canvas.0, self.settings.canvas.1));
+      close = true;
+    }
+    if item(ui, self.i18n.tr("ui-file-save"), "Ctrl+S", true) {
+      self.save(false);
+      close = true;
+    }
+    if item(ui, self.i18n.tr("ui-file-save-as"), "Ctrl+Shift+S", true) {
+      self.save(true);
+      close = true;
+    }
+    if item(ui, self.i18n.tr("ui-file-save-copy"), "Ctrl+Alt+S", true) {
+      self.save_copy();
+      close = true;
+    }
+    if item(ui, self.i18n.tr("ui-file-revert"), "F12", saved && self.dirty()) {
+      self.request(Pending::Revert);
+      close = true;
+    }
+    ui.separator();
+    if item(ui, self.i18n.tr("ui-file-place"), "", true) {
+      self.place();
+      close = true;
+    }
+    for (format, id, shortcut) in
+      [(Export::Png, "ui-file-export-png", "Ctrl+Alt+Shift+W"), (Export::Jpeg, "ui-file-export-jpeg", ""), (Export::Webp, "ui-file-export-webp", "")]
+    {
+      if item(ui, self.i18n.tr(id), shortcut, true) {
+        self.export(format);
+        close = true;
+      }
+    }
+    ui.separator();
+    if item(ui, self.i18n.tr("ui-file-quit"), "Ctrl+Q", true) {
+      self.request(Pending::Close);
+      close = true;
+    }
+    if close {
+      self.popover = None;
+    }
+  }
+
   fn actions_panel(&mut self, ui: &mut egui::Ui) {
     self.title(ui, "ui-actions");
     let wide = |ui: &mut egui::Ui, text: String, shortcut: &str| {
       ui.add(egui::Button::new(text).shortcut_text(shortcut).min_size(vec2(ui.available_width(), 30.0))).clicked()
     };
-    if wide(ui, self.i18n.tr("ui-file-new"), "Ctrl+N") {
-      self.new_canvas = Some(self.settings.canvas);
-      self.popover = None;
-    }
-    if wide(ui, self.i18n.tr("ui-file-open"), "Ctrl+O") {
-      self.request(Pending::Open);
-    }
-    if wide(ui, self.i18n.tr("ui-file-save"), "Ctrl+S") {
-      self.save(false);
-    }
-    if wide(ui, self.i18n.tr("ui-file-save-as"), "Ctrl+Shift+S") {
-      self.save(true);
-    }
-    if wide(ui, self.i18n.tr("ui-file-export-png"), "Ctrl+Alt+Shift+W") {
-      self.export_png();
-    }
-    ui.separator();
     if ui
       .add_enabled(self.doc.selection().is_some(), egui::Button::new(self.i18n.tr("ui-canvas-crop")).min_size(vec2(ui.available_width(), 30.0)))
       .clicked()

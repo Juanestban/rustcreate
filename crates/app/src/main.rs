@@ -49,9 +49,23 @@ fn startup_failed(error: &eframe::Error) {
 }
 
 /// Something that would drop unsaved changes, held until the user answers "Save changes?".
+/// How many files File > Open recent lists.
+const RECENT_FILES: usize = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Export {
+  Png,
+  Jpeg,
+  Webp,
+}
+
 pub(crate) enum Pending {
   New(u32, u32),
-  Open,
+  /// A file, or ask which one.
+  Open(Option<PathBuf>),
+  /// Back to the file as last saved.
+  Revert,
+  /// The app's window.
   Close,
   Install(update::Update),
 }
@@ -181,15 +195,13 @@ impl App {
   fn perform(&mut self, action: Pending) {
     match action {
       Pending::New(width, height) => self.replace(Document::new(width, height), None),
-      Pending::Open => {
-        let Some(path) = rfd::FileDialog::new().add_filter("rustcreate", &["rcreate"]).pick_file() else { return };
-        match Document::open(&path) {
-          Ok(doc) if doc.width.max(doc.height) > self.max_side() => {
-            let error = format!("{} × {} > {}", doc.width, doc.height, self.max_side());
-            self.error = Some(self.i18n.tr_args("ui-error-open", &[("error", error.into())]));
-          }
-          Ok(doc) => self.replace(doc, Some(path)),
-          Err(error) => self.error = Some(self.i18n.tr_args("ui-error-open", &[("error", error.to_string().into())])),
+      Pending::Open(path) => {
+        let Some(path) = path.or_else(|| rfd::FileDialog::new().add_filter("rustcreate", &["rcreate"]).pick_file()) else { return };
+        self.open(path);
+      }
+      Pending::Revert => {
+        if let Some(path) = self.path.clone() {
+          self.open(path);
         }
       }
       Pending::Close => {
@@ -198,6 +210,41 @@ impl App {
       }
       Pending::Install(update) => self.updates.install(update),
     }
+  }
+
+  fn open(&mut self, path: PathBuf) {
+    match Document::open(&path) {
+      Ok(doc) if doc.width.max(doc.height) > self.max_side() => {
+        let error = format!("{} × {} > {}", doc.width, doc.height, self.max_side());
+        self.error = Some(self.i18n.tr_args("ui-error-open", &[("error", error.into())]));
+      }
+      Ok(doc) => {
+        self.remember(&path);
+        self.replace(doc, Some(path));
+      }
+      Err(error) => {
+        // A recent file that is gone leaves the list.
+        if !path.exists() {
+          self.forget(&path);
+        }
+        self.error = Some(self.i18n.tr_args("ui-error-open", &[("error", error.to_string().into())]));
+      }
+    }
+  }
+
+  /// Puts `path` first in File > Open recent.
+  fn remember(&mut self, path: &std::path::Path) {
+    let mut settings = self.settings.clone();
+    settings.recent.retain(|p| p != path);
+    settings.recent.insert(0, path.to_path_buf());
+    settings.recent.truncate(RECENT_FILES);
+    self.apply(settings);
+  }
+
+  pub(crate) fn forget(&mut self, path: &std::path::Path) {
+    let mut settings = self.settings.clone();
+    settings.recent.retain(|p| p != path);
+    self.apply(settings);
   }
 
   /// The largest canvas side this GPU can hold as one texture (ADR 0001).
@@ -248,6 +295,7 @@ impl App {
     match self.doc.save(&path) {
       Ok(()) => {
         self.saved = self.doc.revision();
+        self.remember(&path);
         self.path = Some(path);
         true
       }
@@ -258,13 +306,84 @@ impl App {
     }
   }
 
-  pub(crate) fn export_png(&mut self) {
+  /// File > Save a copy: writes the document somewhere else and keeps working on this file.
+  pub(crate) fn save_copy(&mut self) {
+    self.canvas.end_text(&mut self.doc);
     self.canvas.end_transform(&mut self.doc, true);
-    let dialog = rfd::FileDialog::new().add_filter("PNG", &["png"]).set_file_name(format!("{}.png", self.name()));
-    if let Some(path) = dialog.save_file()
-      && let Err(error) = self.doc.export_png(&path)
-    {
+    let dialog = rfd::FileDialog::new().add_filter("rustcreate", &["rcreate"]).set_file_name(format!("{} copy.rcreate", self.name()));
+    let Some(path) = dialog.save_file() else { return };
+    self.doc.guide = Some(self.canvas.tools.guides.to_json());
+    if let Err(error) = self.doc.save(&path) {
       self.error = Some(self.i18n.tr_args("ui-error-save", &[("error", error.to_string().into())]));
+    }
+  }
+
+  /// The flattened picture as PNG, JPEG (on white: JPEG has no transparency) or WebP (lossless).
+  pub(crate) fn export(&mut self, format: Export) {
+    self.canvas.end_text(&mut self.doc);
+    self.canvas.end_transform(&mut self.doc, true);
+    let (label, extension) = match format {
+      Export::Png => ("PNG", "png"),
+      Export::Jpeg => ("JPEG", "jpg"),
+      Export::Webp => ("WebP", "webp"),
+    };
+    let dialog = rfd::FileDialog::new().add_filter(label, &[extension]).set_file_name(format!("{}.{extension}", self.name()));
+    let Some(path) = dialog.save_file() else { return };
+    let (width, height) = (self.doc.width, self.doc.height);
+    let result = match format {
+      Export::Png => self.doc.export_png(&path).map_err(|e| e.to_string()),
+      Export::Jpeg => {
+        let rgb: Vec<u8> = self
+          .doc
+          .flatten()
+          .as_chunks::<4>()
+          .0
+          .iter()
+          .flat_map(|p| {
+            let a = p[3] as f32 / 255.0;
+            [0, 1, 2].map(|c| (p[c] as f32 * a + 255.0 * (1.0 - a)).round() as u8)
+          })
+          .collect();
+        std::fs::File::create(&path).map_err(|e| e.to_string()).and_then(|file| {
+          let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(std::io::BufWriter::new(file), 92);
+          image::ImageEncoder::write_image(encoder, &rgb, width, height, image::ExtendedColorType::Rgb8).map_err(|e| e.to_string())
+        })
+      }
+      Export::Webp => std::fs::File::create(&path).map_err(|e| e.to_string()).and_then(|file| {
+        let encoder = image::codecs::webp::WebPEncoder::new_lossless(std::io::BufWriter::new(file));
+        image::ImageEncoder::write_image(encoder, &self.doc.flatten(), width, height, image::ExtendedColorType::Rgba8).map_err(|e| e.to_string())
+      }),
+    };
+    if let Err(error) = result {
+      self.error = Some(self.i18n.tr_args("ui-error-save", &[("error", error.into())]));
+    }
+  }
+
+  /// File > Place: an image (PNG, JPEG, WebP) as a new layer in the middle of the canvas,
+  /// shrunk to fit if it is bigger, then a Free Transform to put it in place (Enter applies).
+  pub(crate) fn place(&mut self) {
+    self.canvas.end_text(&mut self.doc);
+    self.canvas.end_transform(&mut self.doc, true);
+    let Some(path) = rfd::FileDialog::new().add_filter(self.i18n.tr("ui-file-images"), &["png", "jpg", "jpeg", "webp"]).pick_file() else { return };
+    let mut picture = match image::open(&path) {
+      Ok(picture) => picture.to_rgba8(),
+      Err(error) => {
+        self.error = Some(self.i18n.tr_args("ui-error-place", &[("error", error.to_string().into())]));
+        return;
+      }
+    };
+    let (width, height) = (self.doc.width, self.doc.height);
+    let fit = (width as f32 / picture.width() as f32).min(height as f32 / picture.height() as f32);
+    if fit < 1.0 {
+      let size = ((picture.width() as f32 * fit).round().max(1.0) as u32, (picture.height() as f32 * fit).round().max(1.0) as u32);
+      picture = image::imageops::resize(&picture, size.0, size.1, image::imageops::FilterType::Triangle);
+    }
+    let at = ((width as i64 - picture.width() as i64) / 2, (height as i64 - picture.height() as i64) / 2);
+    let name = path.file_stem().map_or_else(|| self.i18n.tr("ui-file-place"), |n| n.to_string_lossy().into_owned());
+    self.doc.add_image_layer(&name, picture.as_raw(), picture.dimensions(), at);
+    // A selection would limit the transform to part of the image.
+    if self.doc.selection().is_none() {
+      self.canvas.start_transform(&mut self.doc);
     }
   }
 
@@ -276,7 +395,19 @@ impl App {
     let (m, shift, alt) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT, egui::Modifiers::ALT);
     let key = |modifiers, key| ctx.input_mut(|i| i.consume_key(modifiers, key));
     if key(m | alt | shift, egui::Key::W) {
-      self.export_png();
+      self.export(Export::Png);
+    }
+    if key(m, egui::Key::W) {
+      self.request(Pending::New(self.settings.canvas.0, self.settings.canvas.1));
+    }
+    if key(m, egui::Key::Q) {
+      self.request(Pending::Close);
+    }
+    if key(egui::Modifiers::NONE, egui::Key::F12) && self.path.is_some() {
+      self.request(Pending::Revert);
+    }
+    if key(m | alt, egui::Key::S) {
+      self.save_copy();
     }
     // Canvas Size and Image Size (Photoshop), before Ctrl+I takes the I.
     if key(m | alt, egui::Key::C) {
@@ -304,7 +435,7 @@ impl App {
       self.save(false);
     }
     if key(m, egui::Key::O) {
-      self.request(Pending::Open);
+      self.request(Pending::Open(None));
     }
     if key(m, egui::Key::N) {
       self.new_canvas = Some(self.settings.canvas);

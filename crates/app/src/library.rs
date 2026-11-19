@@ -74,7 +74,7 @@ struct Custom {
 fn builtins() -> Vec<Entry> {
   let base = Brush::ink();
   let flat = Brush { taper_start: 0.0, taper_end: 0.0, streamline: 0.1, ..base };
-  let list: [(&str, usize, Brush); 33] = [
+  let list: [(&str, usize, Brush); 35] = [
     ("graphite", 0, Brush { tilt_size: 0.7, tilt_flow: 0.5, ..Brush::pencil() }),
     ("soft-graphite", 0, Brush { tilt_size: 1.0, tilt_flow: 0.6, size: 10.0, hardness: 0.3, flow: 0.5, grain_depth: 0.75, ..Brush::pencil() }),
     ("technical-pencil", 0, Brush { size: 3.0, hardness: 1.0, flow: 0.9, pressure_size: 0.2, grain: Grain::None, ..Brush::pencil() }),
@@ -149,6 +149,18 @@ fn builtins() -> Vec<Entry> {
       Brush { size: 80.0, tip: Tip::Splatter, angle_jitter: 1.0, size_jitter: 0.5, scatter: 0.4, spacing: 0.15, flow: 0.4, ..Brush::airbrush() },
     ),
     ("blender", 3, Brush { size: 90.0, hardness: 0.0, flow: 0.3, pressure_flow: 1.0, ..Brush::airbrush() }),
+    // Erasers like Photoshop's: full flow and no build-up, so one pass clears what it covers
+    // (the soft one fades only at its edge). Pressure changes the size, not how much is removed.
+    (
+      "hard-eraser",
+      3,
+      Brush { size: 40.0, hardness: 0.9, flow: 1.0, buildup: false, pressure_flow: 0.0, pressure_size: 0.3, spacing: 0.08, ..Brush::airbrush() },
+    ),
+    (
+      "soft-eraser",
+      3,
+      Brush { size: 90.0, hardness: 0.0, flow: 1.0, buildup: false, pressure_flow: 0.0, pressure_size: 0.3, spacing: 0.08, ..Brush::airbrush() },
+    ),
     (
       "chalk",
       4,
@@ -330,6 +342,8 @@ fn token(id: &str) -> &'static str {
     "hard-airbrush" => "ui-brush-hard-airbrush",
     "spray" => "ui-brush-spray",
     "blender" => "ui-brush-blender",
+    "hard-eraser" => "ui-brush-hard-eraser",
+    "soft-eraser" => "ui-brush-soft-eraser",
     "chalk" => "ui-brush-chalk",
     "charcoal" => "ui-brush-charcoal",
     "pastel" => "ui-brush-pastel",
@@ -371,7 +385,7 @@ fn register_images() {
 }
 
 /// Paint with Ink, smudge with the Blender, erase with the Hard Airbrush.
-const DEFAULT_SELECTION: [&str; 3] = ["ink", "blender", "hard-airbrush"];
+const DEFAULT_SELECTION: [&str; 3] = ["ink", "blender", "hard-eraser"];
 
 impl Default for Library {
   /// The built-ins only, nothing read from disk.
@@ -398,7 +412,10 @@ impl Library {
     entries.extend(saved.custom.iter().map(|c| Entry { id: c.id.clone(), name: Name::Custom(c.name.clone()), category: MINE, brush: c.brush }));
     let mut library = Self { entries, selection: [0; 3], saved: Saved::default() };
     for (tool, default) in DEFAULT_SELECTION.iter().enumerate() {
-      library.selection[tool] = library.find(&saved.selected[tool]).or_else(|| library.find(default)).unwrap_or(0);
+      // The eraser used to default to the Hard Airbrush, which takes many passes: move those
+      // who never changed it to the Hard Eraser.
+      let selected = if tool == 2 && saved.selected[tool] == "hard-airbrush" { "" } else { &saved.selected[tool] };
+      library.selection[tool] = library.find(selected).or_else(|| library.find(default)).unwrap_or(0);
     }
     library.saved = library.to_saved();
     library
@@ -511,6 +528,22 @@ impl Library {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn the_default_eraser_clears_in_one_pass() {
+    let library = Library::from_saved(Saved::default());
+    let eraser = library.entries[library.selection[2]].brush;
+    let mut doc = rustcreate_core::Document::new(64, 64);
+    doc.layer_mut(0).unwrap().tile_mut(0, 0).fill(255);
+    let mut stroke = doc.begin_stroke(eraser, [0, 0, 0], true).unwrap();
+    // A light mouse-like pressure: still all gone under the middle of the stroke.
+    for x in [4.0, 20.0, 40.0, 60.0] {
+      stroke.add(&mut doc, x, 32.0, 0.3);
+    }
+    stroke.finish(&mut doc);
+    let tile = doc.layers()[0].tile(0, 0).unwrap();
+    assert!((10..54).all(|x| tile[(32 * rustcreate_core::TILE as usize + x) * 4 + 3] == 0));
+  }
 
   #[test]
   fn builtins_are_named_and_in_every_category() {
