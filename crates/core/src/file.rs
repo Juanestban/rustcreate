@@ -37,6 +37,8 @@ pub enum FileError {
   NewerFormat(u32),
   #[error("not a valid rustcreate document: {0}")]
   Invalid(String),
+  #[error("could not write the GIF: {0}")]
+  Gif(#[from] gif::EncodingError),
 }
 
 fn invalid(why: impl Into<String>) -> FileError {
@@ -236,12 +238,17 @@ impl Document {
   /// The whole visible picture as straight (not premultiplied) RGBA8, row by row: what other
   /// image formats are encoded from.
   pub fn flatten(&self) -> Vec<u8> {
+    self.straight(|tx, ty| self.composite_tile(tx, ty))
+  }
+
+  /// Straight RGBA8 of the whole canvas, from premultiplied tiles.
+  pub(crate) fn straight(&self, tile: impl Fn(u32, u32) -> Option<Vec<u8>>) -> Vec<u8> {
     let (width, height) = (self.width as usize, self.height as usize);
     let mut out = vec![0; width * height * 4];
     let (cols, rows) = self.tiles();
     for ty in 0..rows {
       for tx in 0..cols {
-        let Some(tile) = self.composite_tile(tx, ty) else { continue };
+        let Some(tile) = tile(tx, ty) else { continue };
         for row in 0..TILE as usize {
           let y = ty as usize * TILE as usize + row;
           if y >= height {

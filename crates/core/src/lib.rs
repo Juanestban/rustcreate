@@ -2,6 +2,7 @@
 
 mod adjust;
 mod animation;
+mod animation_export;
 pub mod blend;
 mod brush;
 mod file;

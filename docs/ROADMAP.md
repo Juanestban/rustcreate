@@ -45,8 +45,9 @@
   and groups (ADR 0007); a timeline under the canvas with thumbnails and playback.
 - **Animation step 2 (2026-11-19):** onion skin drawn by the GPU (per-layer fade and tint),
   hold duration (`Layer.hold`), background/foreground frames that never play on their own.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 4 step 3: export GIF, animated
-  PNG and PNG sequence.
+- **Animation step 3 (2026-11-19):** `core::animation_export` writes GIF (`gif` crate), APNG
+  (`png`) and PNG sequences frame by frame.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 4 step 4: MP4 export.
 
 ## Phase 0 — Foundation
 
@@ -201,7 +202,10 @@ time-lapse recording.
 - [x] Onion skin (0–12 frames each side, opacity fading with distance, earlier red and later
       green; on screen only), hold duration per frame, background and foreground frames
 - [x] Playback: loop, ping-pong, one-shot; 1–60 frames per second; a press on the canvas stops it
-- [ ] Export GIF, MP4, animated PNG, PNG sequence
+- [x] Export animated GIF, animated PNG and a PNG sequence (File menu, on a background
+      thread with progress; holds, ping-pong and one shot respected; background/foreground
+      frames included, onion skin never)
+- [ ] Export MP4 (H.264 with OpenH264)
 
 ## Phase 5 — Home screen
 

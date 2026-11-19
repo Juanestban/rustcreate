@@ -325,6 +325,17 @@ impl App {
         close = true;
       }
     }
+    // Animations: with Animation Assist on.
+    let animated = self.doc.animation.enabled;
+    for (format, id) in
+      [(Export::Gif, "ui-file-export-gif"), (Export::AnimatedPng, "ui-file-export-apng"), (Export::PngSequence, "ui-file-export-sequence")]
+    {
+      let response = ui.add_enabled(animated, egui::Button::new(self.i18n.tr(id)).min_size(vec2(ui.available_width(), 30.0)));
+      if response.on_disabled_hover_text(self.i18n.tr("ui-file-animation-only")).clicked() {
+        self.export(format);
+        close = true;
+      }
+    }
     ui.separator();
     if item(ui, self.i18n.tr("ui-file-quit"), "Ctrl+Q", true) {
       self.request(Pending::Close);

@@ -8,6 +8,7 @@ repository.workspace = true
 [dependencies]
 ab_glyph.workspace = true
 fontdb.workspace = true
+gif.workspace = true
 png.workspace = true
 serde.workspace = true
 serde_json.workspace = true

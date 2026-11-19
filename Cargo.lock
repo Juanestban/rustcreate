@@ -3218,6 +3218,7 @@ version = "0.7.1"
 dependencies = [
  "ab_glyph",
  "fontdb",
+ "gif",
  "png 0.18.1",
  "serde",
  "serde_json",

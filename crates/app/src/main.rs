@@ -57,6 +57,17 @@ pub(crate) enum Export {
   Png,
   Jpeg,
   Webp,
+  Gif,
+  AnimatedPng,
+  PngSequence,
+}
+
+/// An animation export running on its own thread: frames written so far, out of `total`, and
+/// its outcome once it ends.
+struct Exporting {
+  done: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+  total: usize,
+  outcome: std::sync::Arc<std::sync::Mutex<Option<Result<(), String>>>>,
 }
 
 pub(crate) enum Pending {
@@ -88,6 +99,8 @@ pub(crate) struct App {
   editing_slider: bool,
   /// Animation playback: when it started (egui time) and the timeline's frame thumbnails.
   pub(crate) playing: Option<f64>,
+  /// An animation being written on another thread.
+  exporting: Option<Exporting>,
   pub(crate) thumbnails_of_frames: ui::timeline::Thumbnails,
   /// Tab hides the interface.
   hidden: bool,
@@ -169,6 +182,7 @@ impl App {
       studio_section: Default::default(),
       preview: None,
       playing: None,
+      exporting: None,
       thumbnails_of_frames: Default::default(),
       settings,
       new_canvas: None,
@@ -322,6 +336,67 @@ impl App {
       self.error = Some(self.i18n.tr_args("ui-error-save", &[("error", error.to_string().into())]));
     }
   }
+  /// An animation as GIF, animated PNG or a folder of PNGs, written on another thread (big
+  /// canvases take a while) with its progress shown.
+  fn export_animation(&mut self, format: Export) {
+    self.stop_playback();
+    let total = self.doc.export_frames().len();
+    if total == 0 || self.exporting.is_some() {
+      return;
+    }
+    let name = self.name();
+    let target = match format {
+      Export::Gif => rfd::FileDialog::new().add_filter("GIF", &["gif"]).set_file_name(format!("{name}.gif")).save_file(),
+      Export::AnimatedPng => rfd::FileDialog::new().add_filter("APNG", &["png", "apng"]).set_file_name(format!("{name}.png")).save_file(),
+      _ => rfd::FileDialog::new().pick_folder(),
+    };
+    let Some(target) = target else { return };
+    let (doc, ctx) = (self.doc.clone(), self.ctx.clone());
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let outcome = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let (thread_done, thread_outcome) = (done.clone(), outcome.clone());
+    std::thread::spawn(move || {
+      let progress = |n: usize| {
+        thread_done.store(n, std::sync::atomic::Ordering::Relaxed);
+        ctx.request_repaint();
+      };
+      let result = match format {
+        Export::Gif => std::fs::File::create(&target).map_err(Into::into).and_then(|file| doc.export_gif(file, &progress)),
+        Export::AnimatedPng => std::fs::File::create(&target).map_err(Into::into).and_then(|file| doc.export_apng(file, &progress)),
+        _ => doc.export_png_sequence(&target, &name, &progress).map(|_| ()),
+      };
+      if let Ok(mut slot) = thread_outcome.lock() {
+        *slot = Some(result.map_err(|e| e.to_string()));
+      }
+      ctx.request_repaint();
+    });
+    self.exporting = Some(Exporting { done, total, outcome });
+  }
+
+  /// The running animation export's progress, at the bottom of the window; its error if it failed.
+  fn export_progress(&mut self, ctx: &egui::Context) {
+    let Some(exporting) = &self.exporting else { return };
+    if let Some(result) = exporting.outcome.lock().ok().and_then(|mut slot| slot.take()) {
+      self.exporting = None;
+      if let Err(error) = result {
+        self.error = Some(self.i18n.tr_args("ui-error-save", &[("error", error.into())]));
+      }
+      return;
+    }
+    let done = exporting.done.load(std::sync::atomic::Ordering::Relaxed);
+    let text = self.i18n.tr_args("ui-exporting", &[("done", (done as i64).into()), ("total", (exporting.total as i64).into())]);
+    let fraction = done as f32 / exporting.total.max(1) as f32;
+    egui::Area::new(egui::Id::unique("export-progress"))
+      .order(egui::Order::Tooltip)
+      .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -24.0))
+      .show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+          ui.set_width(260.0);
+          ui.label(text);
+          ui.add(egui::ProgressBar::new(fraction));
+        });
+      });
+  }
 
   /// The flattened picture as PNG, JPEG (on white: JPEG has no transparency) or WebP (lossless).
   pub(crate) fn export(&mut self, format: Export) {
@@ -331,6 +406,7 @@ impl App {
       Export::Png => ("PNG", "png"),
       Export::Jpeg => ("JPEG", "jpg"),
       Export::Webp => ("WebP", "webp"),
+      animation => return self.export_animation(animation),
     };
     let dialog = rfd::FileDialog::new().add_filter(label, &[extension]).set_file_name(format!("{}.{extension}", self.name()));
     let Some(path) = dialog.save_file() else { return };
@@ -354,6 +430,7 @@ impl App {
           image::ImageEncoder::write_image(encoder, &rgb, width, height, image::ExtendedColorType::Rgb8).map_err(|e| e.to_string())
         })
       }
+      Export::Gif | Export::AnimatedPng | Export::PngSequence => unreachable!("exported above"),
       Export::Webp => std::fs::File::create(&path).map_err(|e| e.to_string()).and_then(|file| {
         let encoder = image::codecs::webp::WebPEncoder::new_lossless(std::io::BufWriter::new(file));
         image::ImageEncoder::write_image(encoder, &self.doc.flatten(), width, height, image::ExtendedColorType::Rgba8).map_err(|e| e.to_string())
@@ -570,6 +647,7 @@ impl eframe::App for App {
       self.sidebar(ui);
     }
     self.timeline(ui);
+    self.export_progress(&ctx);
     // Esc closes an open panel before anything else (a transform, a selection) sees it.
     if self.popover.is_some() && !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
       self.popover = None;
