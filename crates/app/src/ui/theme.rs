@@ -14,7 +14,7 @@ pub const GRADIENT: [Color32; 4] = [hex(0x22d3ee), hex(0x4f6bff), hex(0xec4899),
 pub const ACCENT: Color32 = hex(0x4f6bff);
 
 pub const BAR_HEIGHT: f32 = 44.0;
-pub const SIDEBAR_WIDTH: f32 = 52.0;
+pub const SIDEBAR_WIDTH: f32 = 64.0;
 pub const PANEL_RADIUS: CornerRadius = CornerRadius::same(10);
 
 /// Colors that change with the theme.

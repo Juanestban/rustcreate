@@ -157,7 +157,59 @@ impl Free {
     rotate(p - (self.center + self.offset), -self.angle)
   }
 
+  /// What a press at canvas point `p` takes hold of; `reach` is how near a handle counts.
+  fn grab_at(&self, p: Pos2, reach: f32) -> Grab {
+    let handle = Self::HANDLES.iter().find(|&&(hx, hy)| self.point(hx, hy).distance(p) < reach);
+    let local = self.local(p);
+    let inside = local.x.abs() <= (self.half.x * self.scale.x).abs() && local.y.abs() <= (self.half.y * self.scale.y).abs();
+    match handle {
+      Some(&(hx, hy)) => Grab::Handle(hx, hy),
+      None if inside => Grab::Move,
+      None => Grab::Rotate,
+    }
+  }
+
   const HANDLES: [(f32, f32); 8] = [(-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (-1.0, 1.0), (-1.0, 0.0)];
+}
+
+/// The cursor over a Free Transform for `grab` at screen point `at`.
+fn transform_cursor(ui: &egui::Ui, at: Pos2, grab: Grab, free: &Free, to_canvas: &impl Fn(Pos2) -> Pos2, dragging: bool) {
+  use egui::CursorIcon;
+  let icon = match grab {
+    Grab::Move if dragging => CursorIcon::Grabbing,
+    Grab::Move => CursorIcon::Move,
+    Grab::Handle(hx, hy) => {
+      // The handle's direction on screen (the box and the view may both be turned): canvas
+      // vectors are mapped back through the screen's unit steps.
+      let (c0, cx, cy) = (to_canvas(at), to_canvas(at + vec2(1.0, 0.0)), to_canvas(at + vec2(0.0, 1.0)));
+      let (ex, ey) = (cx - c0, cy - c0);
+      let d = free.point(hx, hy) - free.point(0.0, 0.0);
+      let det = ex.x * ey.y - ex.y * ey.x;
+      let screen = vec2(d.x * ey.y - d.y * ey.x, ex.x * d.y - ex.y * d.x) / det.abs().max(1e-6) * det.signum();
+      let degrees = screen.y.atan2(screen.x).to_degrees().rem_euclid(180.0);
+      match degrees {
+        d if !(22.5..157.5).contains(&d) => CursorIcon::ResizeHorizontal,
+        d if d < 67.5 => CursorIcon::ResizeNwSe,
+        d if d < 112.5 => CursorIcon::ResizeVertical,
+        _ => CursorIcon::ResizeNeSw,
+      }
+    }
+    Grab::Rotate => {
+      // No system cursor turns: a curved arrow by the pointer says it.
+      let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("rotate-cursor")));
+      let center = at + vec2(16.0, 16.0);
+      let arc: Vec<Pos2> = (0..=20).map(|i| center + 8.0 * Vec2::angled((-200.0 + i as f32 * 11.0).to_radians())).collect();
+      let tip = *arc.last().expect("arc points");
+      let back = (tip - arc[arc.len() - 3]).normalized();
+      let side = vec2(-back.y, back.x);
+      for (width, color) in [(4.0, egui::Color32::from_black_alpha(160)), (2.0, egui::Color32::WHITE)] {
+        painter.add(egui::Shape::line(arc.clone(), egui::Stroke::new(width, color)));
+        painter.add(egui::Shape::line(vec![tip - back * 5.0 + side * 4.0, tip, tip - back * 5.0 - side * 4.0], egui::Stroke::new(width, color)));
+      }
+      CursorIcon::Crosshair
+    }
+  };
+  ui.ctx().set_cursor_icon(icon);
 }
 
 fn rotate(v: Vec2, angle: f32) -> Vec2 {
@@ -262,6 +314,17 @@ impl Canvas {
     self.paint(ui, &response, |p| view.to_canvas(rect.center(), canvas, p), doc);
 
     if let Some(renderer) = render_state.renderer.write().callback_resources.get_mut::<CanvasRenderer>() {
+      // A Free Transform drags on the GPU: its pixels go up once, then only the map changes.
+      match &self.transform {
+        Some(free) => {
+          if renderer.floating_layer() != Some(free.lifted.layer_id()) {
+            let (origin, size) = free.lifted.area();
+            renderer.begin_floating(&render_state.device, &render_state.queue, free.lifted.layer_id(), &free.lifted.pixels(), origin, size);
+          }
+          renderer.move_floating(&render_state.queue, free.matrix());
+        }
+        None => renderer.end_floating(),
+      }
       renderer.sync(&render_state.device, &render_state.queue, doc);
     }
     let placement = view.placement(rect, canvas, ui.ctx().pixels_per_point());
@@ -365,7 +428,7 @@ impl Canvas {
     self.shift = shift;
     if self.transform.is_some() {
       // A press on the transform bar (above the canvas) is not a drag.
-      self.transform_input(ui, &to_canvas, doc, (pressed && response.contains_pointer(), released), shift, origin, view_drag);
+      self.transform_input(ui, &to_canvas, (pressed && response.contains_pointer(), released), shift, origin, view_drag);
       return;
     }
     if self.shape_edit {
@@ -584,11 +647,9 @@ impl Canvas {
   }
 
   /// Flips, quarter turns and reset from the transform bar.
-  fn adjust_transform(&mut self, doc: &mut Document, change: impl FnOnce(&mut Free)) {
+  fn adjust_transform(&mut self, change: impl FnOnce(&mut Free)) {
     if let Some(free) = &mut self.transform {
       change(free);
-      let m = free.matrix();
-      free.lifted.update(doc, m);
     }
   }
 
@@ -599,33 +660,28 @@ impl Canvas {
     &mut self,
     ui: &egui::Ui,
     to_canvas: &impl Fn(Pos2) -> Pos2,
-    doc: &mut Document,
     (pressed, released): (bool, bool),
     shift: bool,
     origin: Option<Pos2>,
     view_drag: bool,
   ) {
     let Some(free) = &mut self.transform else { return };
+    // 10 points around the pointer, in canvas pixels.
+    let reach = |at: Pos2| (to_canvas(at + vec2(10.0, 0.0)) - to_canvas(at)).length();
     if pressed
       && !view_drag
       && let Some(origin) = origin
     {
       let p = to_canvas(origin);
-      // 10 points around the pointer, in canvas pixels.
-      let reach = (to_canvas(origin + vec2(10.0, 0.0)) - p).length();
-      let handle = Free::HANDLES.iter().find(|&&(hx, hy)| free.point(hx, hy).distance(p) < reach);
-      let local = free.local(p);
-      let inside = local.x.abs() <= (free.half.x * free.scale.x).abs() && local.y.abs() <= (free.half.y * free.scale.y).abs();
-      let grab = match handle {
-        Some(&(hx, hy)) => Grab::Handle(hx, hy),
-        None if inside => Grab::Move,
-        None => Grab::Rotate,
-      };
-      free.drag = Some((grab, p, (free.offset, free.scale, free.angle)));
+      free.drag = Some((free.grab_at(p, reach(origin)), p, (free.offset, free.scale, free.angle)));
+    }
+    // The pointer shows what a drag does there: move, scale along a handle, or turn.
+    if let Some(at) = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.ui_contains_pointer() && !view_drag) {
+      let grab = free.drag.map_or_else(|| free.grab_at(to_canvas(at), reach(at)), |(grab, ..)| grab);
+      transform_cursor(ui, at, grab, free, to_canvas, free.drag.is_some());
     }
     let Some((grab, start, (offset, scale, angle))) = free.drag else { return };
     let Some(p) = ui.input(|i| i.pointer.interact_pos()).map(to_canvas) else { return };
-    let before = (free.offset, free.scale, free.angle);
     match grab {
       Grab::Move => free.offset = offset + (p - start),
       Grab::Rotate => {
@@ -646,11 +702,7 @@ impl Canvas {
         };
       }
     }
-    // Redraw only when something moved: big layers take a while.
-    if (free.offset, free.scale, free.angle) != before {
-      let m = free.matrix();
-      free.lifted.update(doc, m);
-    }
+    // The GPU previews the new map (see `show`); the pixels are drawn once, on Done.
     if released {
       free.drag = None;
     }
@@ -673,8 +725,9 @@ impl Canvas {
       );
     }
     let mut action = None;
+    // Above the floating panels: the transform waits on Done or Cancel, so they stay in reach.
     egui::Area::new(egui::Id::unique("transform-bar"))
-      .order(egui::Order::Foreground)
+      .order(egui::Order::Tooltip)
       .pivot(egui::Align2::CENTER_BOTTOM)
       .fixed_pos(rect.center_bottom() - vec2(0.0, 16.0))
       .show(ui.ctx(), |ui| {
@@ -696,10 +749,10 @@ impl Canvas {
         });
       });
     match action {
-      Some(0) => self.adjust_transform(doc, |f| f.scale.x = -f.scale.x),
-      Some(1) => self.adjust_transform(doc, |f| f.scale.y = -f.scale.y),
-      Some(2) => self.adjust_transform(doc, |f| f.angle += std::f32::consts::FRAC_PI_2),
-      Some(3) => self.adjust_transform(doc, |f| (f.offset, f.scale, f.angle) = (Vec2::ZERO, Vec2::splat(1.0), 0.0)),
+      Some(0) => self.adjust_transform(|f| f.scale.x = -f.scale.x),
+      Some(1) => self.adjust_transform(|f| f.scale.y = -f.scale.y),
+      Some(2) => self.adjust_transform(|f| f.angle += std::f32::consts::FRAC_PI_2),
+      Some(3) => self.adjust_transform(|f| (f.offset, f.scale, f.angle) = (Vec2::ZERO, Vec2::splat(1.0), 0.0)),
       Some(4) => self.end_transform(doc, false),
       Some(5) => self.end_transform(doc, true),
       _ => {}

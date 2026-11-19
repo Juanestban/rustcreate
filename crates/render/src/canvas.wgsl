@@ -150,6 +150,43 @@ fn composite(in: FullscreenOut) -> @location(0) vec4<f32> {
   return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(ra)), ra);
 }
 
+// ---- Free Transform preview: the lifted pixels drawn through the map over the rest of the
+// layer, like `Transform::update` on the CPU (bilinear, transparent outside). ----
+
+struct FloatParams {
+  // Canvas pixel -> lifted pixel: (m.x * x + m.y * y + t.x, m.z * x + m.w * y + t.y).
+  m: vec4<f32>,
+  // t, then the lifted area's origin on the canvas.
+  t_origin: vec4<f32>,
+  // The lifted area's size.
+  size: vec4<f32>,
+}
+
+@group(0) @binding(0) var float_base: texture_2d<f32>;
+@group(0) @binding(1) var float_pixels: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> float_params: FloatParams;
+
+fn float_tap(i: vec2<i32>) -> vec4<f32> {
+  let size = vec2<i32>(float_params.size.xy);
+  let inside = all(i >= vec2<i32>(0)) && all(i < size);
+  return select(vec4<f32>(0.0), textureLoad(float_pixels, clamp(i, vec2<i32>(0), size - 1), 0), inside);
+}
+
+@fragment
+fn float_layer(in: FullscreenOut) -> @location(0) vec4<f32> {
+  let p = in.position.xy;
+  let m = float_params.m;
+  let at = vec2<f32>(m.x * p.x + m.y * p.y, m.z * p.x + m.w * p.y) + float_params.t_origin.xy - float_params.t_origin.zw - 0.5;
+  let f = floor(at);
+  let a = at - f;
+  let i = vec2<i32>(f);
+  let top = mix(float_tap(i), float_tap(i + vec2<i32>(1, 0)), a.x);
+  let bottom = mix(float_tap(i + vec2<i32>(0, 1)), float_tap(i + vec2<i32>(1, 1)), a.x);
+  let src = mix(top, bottom, a.y);
+  let base = textureLoad(float_base, vec2<i32>(p), 0);
+  return src + base * (1.0 - src.a);
+}
+
 // ---- Display: the composited canvas transformed into the view, over a checkerboard. ----
 
 struct View {
@@ -159,7 +196,7 @@ struct View {
   size: vec2<f32>,
   // Output is decoded to linear when the target format is sRGB.
   srgb_target: u32,
-  // 1 = nearest (zoomed in), 0 = linear.
+  // 1 = nearest (zoomed far in), 0 = filtered.
   nearest: u32,
 }
 
@@ -185,9 +222,20 @@ fn to_linear(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn display_fragment(in: DisplayOut) -> @location(0) vec4<f32> {
+  // Canvas pixels per screen pixel, before any branch (derivatives need uniform control flow).
+  let footprint = fwidth(in.pixel);
   var color: vec4<f32>;
   if view.nearest == 1u {
     color = textureLoad(canvas, vec2<i32>(clamp(in.pixel, vec2<f32>(0.0), view.size - 1.0)), 0);
+  } else if max(footprint.x, footprint.y) > 1.0 {
+    // Zoomed out: one bilinear tap skips pixels and leaves steps on curves; four taps spread
+    // over the screen pixel's footprint average them (a box filter up to about 4:1).
+    let d = footprint * 0.25 / view.size;
+    let uv = in.pixel / view.size;
+    color = 0.25 * (textureSampleLevel(canvas, canvas_sampler, uv + vec2<f32>(-d.x, -d.y), 0.0)
+      + textureSampleLevel(canvas, canvas_sampler, uv + vec2<f32>(d.x, -d.y), 0.0)
+      + textureSampleLevel(canvas, canvas_sampler, uv + vec2<f32>(-d.x, d.y), 0.0)
+      + textureSampleLevel(canvas, canvas_sampler, uv + vec2<f32>(d.x, d.y), 0.0));
   } else {
     color = textureSampleLevel(canvas, canvas_sampler, in.pixel / view.size, 0.0);
   }

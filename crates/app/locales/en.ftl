@@ -297,3 +297,5 @@ ui-resize-anchor = Anchor: the part of the canvas that stays put
 ui-resize-apply = Apply
 ui-layer-group = Group
 ui-layer-ungroup = Ungroup
+ui-close = Close
+ui-layer-rename = Rename (double click)

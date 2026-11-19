@@ -297,3 +297,5 @@ ui-resize-anchor = Ancla: la parte del lienzo que se queda en su sitio
 ui-resize-apply = Aplicar
 ui-layer-group = Agrupar
 ui-layer-ungroup = Desagrupar
+ui-close = Cerrar
+ui-layer-rename = Renombrar (doble clic)

@@ -114,8 +114,11 @@ impl App {
   }
 
   fn toggle(&mut self, popover: Popover) {
-    // Panels change the document (layers, fills): a transform in progress is applied first.
-    self.canvas.end_transform(&mut self.doc, true);
+    // Panels that change the document apply a transform in progress first; brushes, color,
+    // fill and selection options leave it waiting on its bar.
+    if matches!(popover, Popover::Layers | Popover::Actions | Popover::Adjust) {
+      self.canvas.end_transform(&mut self.doc, true);
+    }
     self.popover = if self.popover == Some(popover) { None } else { Some(popover) };
     self.brush_category = None;
   }
@@ -156,7 +159,8 @@ impl App {
     egui::Panel::left("sidebar")
       .exact_size(theme::SIDEBAR_WIDTH)
       .resizable(false)
-      .frame(Frame::NONE.fill(palette.chrome).inner_margin(Margin::symmetric(0, 16)))
+      // Off the window's edge, so the sliders and buttons are not pressed against it.
+      .frame(Frame::NONE.fill(palette.chrome).inner_margin(Margin { left: 12, right: 4, top: 18, bottom: 18 }))
       .show(ui, |ui| {
         ui.vertical_centered(|ui| {
           ui.spacing_mut().slider_width = 170.0;
@@ -196,7 +200,19 @@ impl App {
   /// The open floating panel, under the right end of the top bar (Actions under the left).
   pub(crate) fn popovers(&mut self, ctx: &egui::Context) {
     let Some(popover) = self.popover else { return };
+    // A press on the canvas closes the panel and does nothing else (like tapping away in
+    // Procreate): a see-through cover over the canvas, under the panel, takes it.
     let screen = ctx.content_rect();
+    let canvas = egui::Rect::from_min_max(screen.min + vec2(theme::SIDEBAR_WIDTH, theme::BAR_HEIGHT), screen.max);
+    egui::Area::new(egui::Id::unique("popover-cover")).order(egui::Order::Middle).fixed_pos(canvas.min).show(ctx, |ui| {
+      let cover = ui.allocate_rect(egui::Rect::from_min_size(canvas.min, canvas.size()), Sense::click_and_drag());
+      if cover.clicked() || cover.drag_started() {
+        self.popover = None;
+      }
+    });
+    if self.popover.is_none() {
+      return;
+    }
     let (anchor, pivot) = match popover {
       Popover::Actions => (Pos2::new(screen.left() + 10.0, screen.top() + theme::BAR_HEIGHT + 6.0), Align2::LEFT_TOP),
       _ => (Pos2::new(screen.right() - 10.0, screen.top() + theme::BAR_HEIGHT + 6.0), Align2::RIGHT_TOP),
@@ -206,9 +222,16 @@ impl App {
       Frame::popup(ui.style()).fill(palette.panel).corner_radius(theme::PANEL_RADIUS).inner_margin(Margin::same(12)).show(ui, |ui| {
         ui.set_width(match popover {
           Popover::Color => 260.0,
-          Popover::Brushes => 380.0,
+          Popover::Brushes => 330.0,
+          Popover::Layers => 320.0,
           _ => 280.0,
         });
+        // A close button in the corner, for those who don't know Esc or tapping away.
+        let corner = ui.max_rect().right_top();
+        let close = egui::Rect::from_min_size(corner - vec2(22.0, 0.0), Vec2::splat(22.0));
+        if ui.put(close, egui::Button::new("×").frame(false)).on_hover_text(format!("{} (Esc)", self.i18n.tr("ui-close"))).clicked() {
+          self.popover = None;
+        }
         match popover {
           Popover::Actions => self.actions_panel(ui),
           Popover::Brushes => self.brushes_panel(ui),
@@ -424,7 +447,7 @@ impl App {
     let category = *self.brush_category.get_or_insert(self.canvas.tools.library.entries[selected].category);
     ui.horizontal_top(|ui| {
       ui.vertical(|ui| {
-        ui.set_width(118.0);
+        ui.set_width(96.0);
         for (index, id) in CATEGORIES.iter().enumerate() {
           if ui.selectable_label(category == index, self.i18n.tr(id)).clicked() {
             self.brush_category = Some(index);
@@ -433,7 +456,9 @@ impl App {
       });
       ui.separator();
       ui.vertical(|ui| {
-        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+        // At most half the window tall, so the canvas stays in view.
+        let tall = (ui.ctx().content_rect().height() * 0.5).clamp(200.0, 360.0);
+        egui::ScrollArea::vertical().max_height(tall).show(ui, |ui| {
           let indices: Vec<usize> =
             (0..self.canvas.tools.library.entries.len()).filter(|&i| self.canvas.tools.library.entries[i].category == category).collect();
           if indices.is_empty() {
@@ -446,9 +471,9 @@ impl App {
               .corner_radius(6)
               .inner_margin(Margin::symmetric(8, 4))
               .show(ui, |ui| {
-                ui.set_width(220.0);
+                ui.set_width(186.0);
                 ui.label(RichText::new(self.brush_name(index)).strong());
-                ui.add(egui::Image::new(&thumbnail).fit_to_exact_size(vec2(220.0, 44.0)));
+                ui.add(egui::Image::new(&thumbnail).fit_to_exact_size(vec2(186.0, 37.0)));
               });
             if ui.interact(response.response.rect, ui.scope_id().with(("brush", index)), Sense::click()).clicked() {
               self.canvas.tools.select(index);
@@ -545,7 +570,8 @@ impl App {
     });
     ui.add_space(6.0);
     let palette = theme::palette(ui);
-    egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+    let tall = (ui.ctx().content_rect().height() * 0.55).clamp(220.0, 480.0);
+    egui::ScrollArea::vertical().max_height(tall).show(ui, |ui| {
       for index in (0..self.doc.layers().len()).rev() {
         let layer = &self.doc.layers()[index];
         let (id, hidden, locked) = (layer.id, layer.hidden, layer.locked);
@@ -555,55 +581,68 @@ impl App {
         if layer.is_group() {
           shown = format!("▸ {shown}");
         }
-        // Children are indented under their group.
-        let indent = self.doc.depth(index) as f32 * 14.0;
         if layer.mask.is_some() {
           shown.push_str(" ◐");
         }
+        // Children are indented under their group.
+        let indent = self.doc.depth(index) as f32 * 14.0;
         let active = index == self.doc.active();
-        let row = Frame::NONE
-          .fill(if active { palette.selected } else { palette.control })
-          .corner_radius(6)
-          .inner_margin(Margin::symmetric(8, 4))
-          .show(ui, |ui| {
+        Frame::NONE.fill(if active { palette.selected } else { palette.control }).corner_radius(6).inner_margin(Margin::symmetric(8, 3)).show(
+          ui,
+          |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-              ui.add_space(indent);
-              let renaming = self.renaming.as_ref().is_some_and(|(layer, _)| *layer == id);
-              if renaming {
-                let (_, text) = self.renaming.as_mut().expect("renaming");
-                let edit = ui.add(egui::TextEdit::singleline(text).desired_width(150.0));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+              if icons::button(ui, if hidden { Icon::EyeOff } else { Icon::Eye }, false, true, &self.i18n.tr("ui-layer-visible")).clicked() {
+                self.doc.checkpoint();
+                self.doc.layer_mut(index).expect("layer").hidden = !hidden;
+              }
+              if icons::button(ui, Icon::Lock, locked, true, &self.i18n.tr("ui-layer-lock")).clicked() {
+                self.doc.checkpoint();
+                self.doc.layer_mut(index).expect("layer").locked = !locked;
+              }
+              // The name takes the rest of the row: a click selects, a double click renames.
+              let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
+              let text = rect.with_min_x(rect.left() + indent);
+              if self.renaming.as_ref().is_some_and(|(layer, _)| *layer == id) {
+                let (_, typed) = self.renaming.as_mut().expect("renaming");
+                let edit = ui.put(text, egui::TextEdit::singleline(typed).font(egui::FontId::proportional(14.5)));
                 edit.request_focus();
-                if edit.lost_focus() {
-                  let (_, text) = self.renaming.take().expect("renaming");
-                  if !text.trim().is_empty() && text != name {
-                    self.doc.rename_layer(index, text.trim());
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                  self.renaming = None;
+                } else if edit.lost_focus() {
+                  let (_, typed) = self.renaming.take().expect("renaming");
+                  if !typed.trim().is_empty() && typed != name {
+                    self.doc.rename_layer(index, typed.trim());
                   }
                 }
               } else {
-                let label =
-                  ui.add(egui::Label::new(RichText::new(&shown).color(if hidden { palette.muted } else { palette.ink })).sense(Sense::click()));
-                if label.double_clicked() {
+                let color = if hidden { palette.muted } else { palette.ink };
+                let galley = ui.painter().layout_no_wrap(shown, egui::FontId::proportional(14.5), color);
+                let at = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text).min;
+                ui.painter().with_clip_rect(text).galley(at, galley, color);
+                if response.double_clicked() {
                   self.renaming = Some((id, name.clone()));
-                } else if label.clicked() {
+                } else if response.clicked() {
                   self.doc.select(index);
                 }
+                response.context_menu(|ui| {
+                  if ui.button(self.i18n.tr("ui-layer-rename")).clicked() {
+                    self.renaming = Some((id, name.clone()));
+                    ui.close();
+                  }
+                  if ui.button(self.i18n.tr("ui-layer-duplicate")).clicked() {
+                    self.doc.duplicate_layer(index);
+                    ui.close();
+                  }
+                  if ui.add_enabled(self.doc.layers().len() > 1, egui::Button::new(self.i18n.tr("ui-layer-delete"))).clicked() {
+                    self.doc.delete_layer(index);
+                    ui.close();
+                  }
+                });
               }
-              ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if icons::button(ui, if hidden { Icon::EyeOff } else { Icon::Eye }, false, true, &self.i18n.tr("ui-layer-visible")).clicked() {
-                  self.doc.checkpoint();
-                  self.doc.layer_mut(index).expect("layer").hidden = !hidden;
-                }
-                if icons::button(ui, Icon::Lock, locked, true, &self.i18n.tr("ui-layer-lock")).clicked() {
-                  self.doc.checkpoint();
-                  self.doc.layer_mut(index).expect("layer").locked = !locked;
-                }
-              });
             });
-          });
-        if ui.interact(row.response.rect, ui.scope_id().with(("layer", id)), Sense::click()).clicked() {
-          self.doc.select(index);
-        }
+          },
+        );
         ui.add_space(3.0);
       }
     });

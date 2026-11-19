@@ -89,16 +89,22 @@ fn disc(ui: &mut egui::Ui, hsv: &mut Hsva, marks: &[f32]) -> bool {
   let painter = ui.painter();
   let mut mesh = Mesh::default();
   let at = |turns: f32, radius: f32| center + radius * Vec2::angled(turns * TAU);
-  const SEGMENTS: u32 = 96;
+  // Both edges fade out over one physical pixel: a mesh gets none of egui's own anti-aliasing,
+  // and a hard edge shows steps around the ring.
+  let feather = 1.0 / ui.ctx().pixels_per_point();
+  const SEGMENTS: u32 = 128;
   for i in 0..=SEGMENTS {
     let t = i as f32 / SEGMENTS as f32;
     let color = Color32::from(Hsva::new(t, 1.0, 1.0, 1.0));
-    mesh.colored_vertex(at(t, outer), color);
-    mesh.colored_vertex(at(t, inner), color);
+    for (radius, color) in [(outer, Color32::TRANSPARENT), (outer - feather, color), (inner + feather, color), (inner, Color32::TRANSPARENT)] {
+      mesh.colored_vertex(at(t, radius), color);
+    }
     if i > 0 {
-      let k = i * 2;
-      mesh.add_triangle(k - 2, k - 1, k);
-      mesh.add_triangle(k - 1, k, k + 1);
+      let (now, before) = (i * 4, (i - 1) * 4);
+      for band in 0..3 {
+        mesh.add_triangle(before + band, before + band + 1, now + band);
+        mesh.add_triangle(before + band + 1, now + band, now + band + 1);
+      }
     }
   }
   // The square, as a grid so the colors blend like HSV and not like RGB corners.

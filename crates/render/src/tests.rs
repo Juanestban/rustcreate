@@ -164,3 +164,44 @@ fn gpu_groups_match_the_cpu_reference() {
     }
   }
 }
+
+#[test]
+fn floating_transform_matches_the_cpu_result() {
+  let Some((device, queue)) = device() else {
+    eprintln!("no GPU adapter: skipping");
+    return;
+  };
+  let (width, height) = (64, 48);
+  let mut doc = Document::new(width, height);
+  // A gradient square on the layer, and paint outside it that stays put.
+  let tile = doc.layer_mut(0).unwrap().tile_mut(0, 0);
+  for y in 4..20usize {
+    for x in 6..30usize {
+      let p = (y * TILE as usize + x) * 4;
+      let a = (40 + x * 7) as u8;
+      tile[p..p + 4].copy_from_slice(&[a / 2, (y * 9) as u8 % a, a, a]);
+    }
+  }
+  doc.select_shape(&rustcreate_core::SelectShape::Rectangle((6.0, 4.0), (20.0, 20.0)), rustcreate_core::SelectMode::Replace);
+  let mut transform = doc.begin_transform().unwrap();
+  // Turned, scaled and moved: [a, b, c, d, tx, ty].
+  let (sin, cos) = 0.4f32.sin_cos();
+  let m = [1.3 * cos, -1.3 * sin, 1.3 * sin, 1.3 * cos, 14.0, 6.0];
+
+  let mut renderer = CanvasRenderer::new(&device, wgpu::TextureFormat::Bgra8Unorm, (width, height));
+  let (origin, size) = transform.area();
+  renderer.begin_floating(&device, &queue, transform.layer_id(), &transform.pixels(), origin, size);
+  renderer.move_floating(&queue, m);
+  renderer.sync(&device, &queue, &mut doc);
+  let gpu = read_back(&device, &queue, renderer.composite_texture(), (width, height));
+
+  transform.update(&mut doc, m);
+  let cpu = doc.composite_tile(0, 0).unwrap();
+  for y in 0..height as usize {
+    for x in 0..width as usize {
+      let g = &gpu[(y * width as usize + x) * 4..][..4];
+      let c = &cpu[(y * TILE as usize + x) * 4..][..4];
+      assert!(g.iter().zip(c).all(|(g, c)| g.abs_diff(*c) <= 2), "({x}, {y}): gpu {g:?} cpu {c:?}");
+    }
+  }
+}

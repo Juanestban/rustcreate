@@ -51,6 +51,24 @@ pub struct CanvasRenderer {
   view_buffer: wgpu::Buffer,
   sampler: wgpu::Sampler,
   srgb_target: bool,
+  /// A Free Transform's lifted pixels, drawn over their layer through a map that changes every
+  /// frame of a drag; only the map is uploaded then.
+  floating: Option<Floating>,
+  /// The floating layer's map changed since the last composite.
+  float_moved: bool,
+  /// The floating layer combined with the rest of its layer, used in its place.
+  scratch: Option<(wgpu::Texture, wgpu::TextureView)>,
+  float_pipeline: wgpu::RenderPipeline,
+  float_layout: wgpu::BindGroupLayout,
+}
+
+struct Floating {
+  layer: u64,
+  view: wgpu::TextureView,
+  params: wgpu::Buffer,
+  origin: (u32, u32),
+  size: (u32, u32),
+  matrix: [f32; 6],
 }
 
 impl CanvasRenderer {
@@ -75,6 +93,10 @@ impl CanvasRenderer {
     let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
       label: Some("composite"),
       entries: &[texture_entry(0), texture_entry(1), uniform_entry(2, wgpu::ShaderStages::FRAGMENT), texture_entry(3), texture_entry(4)],
+    });
+    let float_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+      label: Some("float"),
+      entries: &[texture_entry(0), texture_entry(1), uniform_entry(2, wgpu::ShaderStages::FRAGMENT)],
     });
     let display_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
       label: Some("display"),
@@ -110,6 +132,7 @@ impl CanvasRenderer {
       })
     };
     let composite_pipeline = pipeline(&composite_layout, "fullscreen", "composite", FORMAT, wgpu::PrimitiveTopology::TriangleList);
+    let float_pipeline = pipeline(&float_layout, "fullscreen", "float_layer", FORMAT, wgpu::PrimitiveTopology::TriangleList);
     let display_pipeline = pipeline(&display_layout, "display_vertex", "display_fragment", target, wgpu::PrimitiveTopology::TriangleStrip);
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
       mag_filter: wgpu::FilterMode::Linear,
@@ -140,6 +163,11 @@ impl CanvasRenderer {
       view_buffer,
       sampler,
       srgb_target: target.is_srgb(),
+      floating: None,
+      float_moved: false,
+      scratch: None,
+      float_pipeline,
+      float_layout,
     }
   }
 
@@ -167,9 +195,73 @@ impl CanvasRenderer {
 
     let composed: Vec<_> =
       doc.layers().iter().map(|l| (l.id, l.opacity.to_bits(), l.hidden, l.blend, l.clip, l.mask.as_ref().map(|m| m.id), l.parent())).collect();
-    if changed || composed != self.composed {
+    if changed || composed != self.composed || std::mem::take(&mut self.float_moved) {
       self.composite(device, queue, doc.layers());
       self.composed = composed;
+    }
+  }
+
+  /// The layer a Free Transform floats over, if one is shown.
+  pub fn floating_layer(&self) -> Option<u64> {
+    self.floating.as_ref().map(|f| f.layer)
+  }
+
+  /// Shows a Free Transform's lifted pixels (premultiplied RGBA8, `size` from `origin`) over
+  /// layer `layer`, which holds the rest. They are uploaded once; `move_floating` places them.
+  pub fn begin_floating(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, layer: u64, pixels: &[u8], origin: (u32, u32), size: (u32, u32)) {
+    let extent = wgpu::Extent3d { width: size.0.max(1), height: size.1.max(1), depth_or_array_layers: 1 };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+      label: Some("floating"),
+      size: extent,
+      mip_level_count: 1,
+      sample_count: 1,
+      dimension: wgpu::TextureDimension::D2,
+      format: FORMAT,
+      usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+      view_formats: &[],
+    });
+    queue.write_texture(
+      texture.as_image_copy(),
+      pixels,
+      wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size.0 * 4), rows_per_image: None },
+      extent,
+    );
+    let params = device.create_buffer(&wgpu::BufferDescriptor {
+      label: Some("float params"),
+      size: 48,
+      usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+      mapped_at_creation: false,
+    });
+    if self.scratch.is_none() {
+      self.scratch = Some(stack_texture(device, self.size.0, self.size.1));
+    }
+    let view = texture.create_view(&Default::default());
+    self.floating = Some(Floating { layer, view, params, origin, size, matrix: [f32::NAN; 6] });
+  }
+
+  /// Where the floating pixels go: canvas point (x, y) of the lifted area goes to
+  /// (a·x + b·y + tx, c·x + d·y + ty), `matrix` = [a, b, c, d, tx, ty].
+  pub fn move_floating(&mut self, queue: &wgpu::Queue, matrix: [f32; 6]) {
+    let Some(float) = &mut self.floating else { return };
+    if float.matrix == matrix {
+      return;
+    }
+    float.matrix = matrix;
+    let [a, b, c, d, tx, ty] = matrix;
+    let det = a * d - b * c;
+    // A flat map shows nothing: every pixel maps far outside.
+    let (ia, ib, ic, id) = if det.abs() < 1e-8 { (0.0, 0.0, 0.0, 0.0) } else { (d / det, -b / det, -c / det, a / det) };
+    let (itx, ity) = if det.abs() < 1e-8 { (-1e9, -1e9) } else { (-(ia * tx + ib * ty), -(ic * tx + id * ty)) };
+    let values = [ia, ib, ic, id, itx, ity, float.origin.0 as f32, float.origin.1 as f32, float.size.0 as f32, float.size.1 as f32, 0.0, 0.0];
+    let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_ne_bytes()).collect();
+    queue.write_buffer(&float.params, 0, &bytes);
+    self.float_moved = true;
+  }
+
+  /// The transform ended: its layer is drawn from its own pixels again.
+  pub fn end_floating(&mut self) {
+    if self.floating.take().is_some() {
+      self.float_moved = true;
     }
   }
 
@@ -185,6 +277,22 @@ impl CanvasRenderer {
       self.bases.push(stack_texture(device, self.size.0, self.size.1));
     }
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("composite") });
+    // The floating layer first: the rest of its layer with the lifted pixels drawn over it.
+    if let (Some(float), Some(scratch)) = (&self.floating, &self.scratch)
+      && let Some(gpu) = self.layers.get(&float.layer)
+    {
+      let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &self.float_layout,
+        entries: &[
+          wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&gpu.view) },
+          wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&float.view) },
+          wgpu::BindGroupEntry { binding: 2, resource: float.params.as_entire_binding() },
+        ],
+      });
+      pass(&mut encoder, &scratch.1, Some((&self.float_pipeline, &group)));
+    }
+    let floating = self.floating.as_ref().map(|f| f.layer);
     let mut current = vec![0usize; depths];
     for step in &steps {
       match *step {
@@ -203,6 +311,7 @@ impl CanvasRenderer {
         Step::Draw { depth, index, source, base, clipped } => {
           let layer = &layers[index];
           let view = |source: Source| match source {
+            Source::Layer(id) if Some(id) == floating => &self.scratch.as_ref().expect("made with the floating layer").1,
             Source::Layer(id) => &self.layers[&id].view,
             Source::Group(depth) => &self.stacks[depth][current[depth]].1,
             Source::Base(depth) => &self.bases[depth].1,
@@ -250,14 +359,15 @@ impl CanvasRenderer {
       let [x, y] = to_clip(placement.t[0], placement.t[1]);
       [x - 1.0, y + 1.0]
     };
-    // Zoomed in (a canvas pixel covers a screen pixel or more): show crisp pixels.
+    // Zoomed far in (a canvas pixel covers 3 screen pixels or more): crisp pixels. Below that,
+    // nearest makes uneven steps (at 1.25 or 1.5 display scaling some pixels double, some not).
     let scale = placement.m[0][0].hypot(placement.m[0][1]);
     let mut bytes = Vec::with_capacity(48);
     for value in [m[0][0], m[0][1], m[1][0], m[1][1], t[0], t[1], self.size.0 as f32, self.size.1 as f32] {
       bytes.extend(value.to_ne_bytes());
     }
     bytes.extend(u32::from(self.srgb_target).to_ne_bytes());
-    bytes.extend(u32::from(scale >= 1.0).to_ne_bytes());
+    bytes.extend(u32::from(scale >= 3.0).to_ne_bytes());
     bytes.resize(48, 0);
     queue.write_buffer(&self.view_buffer, 0, &bytes);
   }

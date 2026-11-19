@@ -14,6 +14,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `H` (toggle) / hold `Space` | Hand (pan) | ✅ |
 | `Z` | Zoom tool | 🕓 |
 | `R` | Rotate view (`Esc` resets rotation) | ✅ |
+| `Esc` | Close the open panel (brushes, layers, color…); a press on the canvas closes it too | ✅ |
 | `S` | Smudge | ✅ |
 | `G` | Paint bucket; again for the gradient | ✅ |
 | `M` | Marquee selection (again: ellipse) | ✅ |

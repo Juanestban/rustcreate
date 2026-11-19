@@ -60,3 +60,7 @@ zip = { version = "9.7", default-features = false, features = [
 # Debug builds with optimized dependencies: egui and wgpu run about as fast as in release.
 [profile.dev.package."*"]
 opt-level = 2
+# Our own pixel code too (brushes, fills, transforms, adjustments): unoptimized it is tens of
+# times slower, so `cargo run` lagged where a release build does not.
+[profile.dev.package.rustcreate-core]
+opt-level = 2

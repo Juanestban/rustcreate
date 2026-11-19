@@ -433,6 +433,10 @@ impl eframe::App for App {
       self.top_bar(ui);
       self.sidebar(ui);
     }
+    // Esc closes an open panel before anything else (a transform, a selection) sees it.
+    if self.popover.is_some() && !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+      self.popover = None;
+    }
     let keys = !ctx.egui_wants_keyboard_input() && self.confirm.is_none() && self.adjusting.is_none() && self.resize.is_none();
     let render_state = self.render_state.clone();
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(ui.visuals().extreme_bg_color)).show(ui, |ui| {

@@ -89,10 +89,26 @@ impl Transform {
     (x, y, x + self.size.0 as f32, y + self.size.1 as f32)
   }
 
+  /// The layer the pixels were lifted from (it holds the rest of them meanwhile).
+  pub fn layer_id(&self) -> u64 {
+    self.layer_id
+  }
+
+  /// The lifted area's top left corner and size, in canvas pixels.
+  pub fn area(&self) -> ((u32, u32), (u32, u32)) {
+    (self.origin, self.size)
+  }
+
+  /// The lifted pixels as premultiplied RGBA8, row by row: what a GPU preview draws while the
+  /// user drags, so `update` runs only once, on `finish`.
+  pub fn pixels(&self) -> Vec<u8> {
+    self.source.iter().flat_map(|p| p.map(|v| v.round().clamp(0.0, 255.0) as u8)).collect()
+  }
+
   /// Draws the lifted pixels through `m` over the layer they were lifted from.
   pub fn update(&mut self, doc: &mut Document, m: Affine) {
-    // shortcut: redraws every covered pixel with bilinear sampling on each call (a full 4096²
-    // layer took 76 ms in release, M-series Mac); move to the GPU if transforming big layers lags.
+    // Every covered pixel, bilinear (a full 4096² layer takes about 76 ms in release on an
+    // M-series Mac): the app calls it once, on `finish`, and previews drags on the GPU.
     let Some(inverse) = invert(m) else { return };
     let (width, height) = (doc.width, doc.height);
     let Some(layer) = doc.find_mut(self.layer_id) else { return };

@@ -28,6 +28,13 @@
   panic on the main thread shows a dialog and ends the process. `%APPDATA%\rustcreate\rustcreate.log` records each run's steps, panics with
   backtraces and UI stalls; the previous run stays in `rustcreate.previous.log`.
 - **Not verified yet:** MSI packaging and the `.ico` (`build.rs`) only run on Windows/CI.
+- **UI pass (2026-11-18):** Free Transform previews on the GPU (the lifted pixels upload once,
+  each drag frame only moves a map; pixels are drawn once, on Done) with cursors for move, scale
+  and turn; its bar stays above the panels, and brushes/color panels no longer apply it. Panels
+  close with Esc, a press on the canvas or their ×. The canvas display averages four taps when
+  zoomed out and shows crisp pixels only from 3×; the hue ring has soft edges. Layer rows are
+  taller with centered names, rename by double click or right click. `rustcreate-core` builds
+  optimized in dev too.
 - **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 3: text layers next.
 
 ## Phase 0 — Foundation
