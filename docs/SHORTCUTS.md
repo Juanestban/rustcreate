@@ -74,7 +74,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Ctrl+Shift+G` | Ungroup | ✅ |
 | `Ctrl+Alt+G` | Clipping mask | ✅ |
 | `/` | Alpha Lock (lock transparent pixels) | ✅ |
-| `Ctrl+[` / `Ctrl+]` | Move layer down / up | ✅ |
+| `Ctrl+[` / `Ctrl+]` | Move layer down / up (at the edge of a group it steps out of it) | ✅ |
 | `Alt+[` / `Alt+]` | Select layer below / above | ✅ |
 
 ## View
