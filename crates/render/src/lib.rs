@@ -35,11 +35,14 @@ pub struct CanvasRenderer {
   size: (u32, u32),
   layers: HashMap<u64, LayerTexture>,
   /// Ping-pong targets; `result` indexes the finished composite.
-  stack: [(wgpu::Texture, wgpu::TextureView); 2],
+  /// Ping-pong targets per group depth: 0 is the canvas, 1 the groups in it, and so on.
+  stacks: Vec<[(wgpu::Texture, wgpu::TextureView); 2]>,
+  /// Per depth: a copy of a group's result that clipped layers above it are limited to.
+  bases: Vec<(wgpu::Texture, wgpu::TextureView)>,
   result: usize,
-  /// What the last composite was made from: (id, opacity, hidden, blend, clip, mask id) bottom
-  /// to top.
-  composed: Vec<(u64, u32, bool, BlendMode, bool, Option<u64>)>,
+  /// What the last composite was made from: (id, opacity, hidden, blend, clip, mask id, group)
+  /// bottom to top.
+  composed: Vec<Composed>,
   composite_pipeline: wgpu::RenderPipeline,
   composite_layout: wgpu::BindGroupLayout,
   display_pipeline: wgpu::RenderPipeline,
@@ -121,10 +124,12 @@ impl CanvasRenderer {
     });
     let stack = [stack_texture(device, width, height), stack_texture(device, width, height)];
     let display_group = display_group(device, &display_layout, &stack[0].1, &sampler, &view_buffer);
+    let stacks = vec![stack];
     Self {
       size: (width, height),
       layers: HashMap::new(),
-      stack,
+      stacks,
+      bases: Vec::new(),
       result: 0,
       composed: Vec::new(),
       composite_pipeline,
@@ -145,8 +150,12 @@ impl CanvasRenderer {
     assert_eq!((doc.width, doc.height), self.size, "a CanvasRenderer draws one canvas size");
     let mut changed = false;
     for layer in doc.layers_mut() {
-      let gpu = self.layers.entry(layer.id).or_insert_with(|| layer_texture(device, self.size));
-      changed |= upload(queue, gpu, layer, self.size);
+      // A group has no pixels: a 1×1 texture just to hold its parameters.
+      let size = if layer.is_group() { (1, 1) } else { self.size };
+      let gpu = self.layers.entry(layer.id).or_insert_with(|| layer_texture(device, size));
+      if !layer.is_group() {
+        changed |= upload(queue, gpu, layer, self.size);
+      }
       // A mask is one more texture, keyed by its own id.
       if let Some(mask) = layer.mask.as_deref_mut() {
         let gpu = self.layers.entry(mask.id).or_insert_with(|| layer_texture(device, self.size));
@@ -157,7 +166,7 @@ impl CanvasRenderer {
     self.layers.retain(|id, _| live.contains(id));
 
     let composed: Vec<_> =
-      doc.layers().iter().map(|l| (l.id, l.opacity.to_bits(), l.hidden, l.blend, l.clip, l.mask.as_ref().map(|m| m.id))).collect();
+      doc.layers().iter().map(|l| (l.id, l.opacity.to_bits(), l.hidden, l.blend, l.clip, l.mask.as_ref().map(|m| m.id), l.parent())).collect();
     if changed || composed != self.composed {
       self.composite(device, queue, doc.layers());
       self.composed = composed;
@@ -165,44 +174,69 @@ impl CanvasRenderer {
   }
 
   fn composite(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, layers: &[Layer]) {
+    let mut steps = Vec::new();
+    plan(layers, None, 0..layers.len(), 0, &mut steps);
+    // Targets for every depth the plan reaches.
+    let depths = steps.iter().map(|s| if let Step::Clear(d) = s { *d + 1 } else { 0 }).max().unwrap_or(1);
+    while self.stacks.len() < depths {
+      self.stacks.push([stack_texture(device, self.size.0, self.size.1), stack_texture(device, self.size.0, self.size.1)]);
+    }
+    while self.bases.len() + 1 < depths {
+      self.bases.push(stack_texture(device, self.size.0, self.size.1));
+    }
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("composite") });
-    let mut target = 0;
-    pass(&mut encoder, &self.stack[target].1, None);
-    // The base of the current clipping group (like `Document::composite_tile`).
-    let mut base = None;
-    for (i, layer) in layers.iter().enumerate() {
-      let clipped = layer.clip && i > 0;
-      if !clipped {
-        base = (!layer.hidden).then_some(layer.id);
+    let mut current = vec![0usize; depths];
+    for step in &steps {
+      match *step {
+        Step::Clear(depth) => {
+          current[depth] = 0;
+          pass(&mut encoder, &self.stacks[depth][0].1, None);
+        }
+        Step::KeepBase(depth) => {
+          let (w, h) = self.size;
+          encoder.copy_texture_to_texture(
+            self.stacks[depth + 1][current[depth + 1]].0.as_image_copy(),
+            self.bases[depth].0.as_image_copy(),
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+          );
+        }
+        Step::Draw { depth, index, source, base, clipped } => {
+          let layer = &layers[index];
+          let view = |source: Source| match source {
+            Source::Layer(id) => &self.layers[&id].view,
+            Source::Group(depth) => &self.stacks[depth][current[depth]].1,
+            Source::Base(depth) => &self.bases[depth].1,
+          };
+          let gpu = &self.layers[&layer.id];
+          let mut params = [0u8; 16];
+          params[..4].copy_from_slice(&layer.opacity.clamp(0.0, 1.0).to_ne_bytes());
+          params[4..8].copy_from_slice(&(layer.blend as u32).to_ne_bytes());
+          params[8..12].copy_from_slice(&u32::from(clipped).to_ne_bytes());
+          params[12..16].copy_from_slice(&u32::from(layer.mask.is_some()).to_ne_bytes());
+          queue.write_buffer(&gpu.params, 0, &params);
+          // Without a mask the binding still needs a texture; the shader does not read it.
+          let mask = layer.mask.as_ref().map_or(view(source), |m| &self.layers[&m.id].view);
+          let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.composite_layout,
+            entries: &[
+              wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.stacks[depth][current[depth]].1) },
+              wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(view(source)) },
+              wgpu::BindGroupEntry { binding: 2, resource: gpu.params.as_entire_binding() },
+              wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(view(base)) },
+              wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(mask) },
+            ],
+          });
+          current[depth] = 1 - current[depth];
+          pass(&mut encoder, &self.stacks[depth][current[depth]].1, Some((&self.composite_pipeline, &group)));
+        }
       }
-      let Some(base_id) = base.filter(|_| !layer.hidden) else { continue };
-      let gpu = &self.layers[&layer.id];
-      let mut params = [0u8; 16];
-      params[..4].copy_from_slice(&layer.opacity.clamp(0.0, 1.0).to_ne_bytes());
-      params[4..8].copy_from_slice(&(layer.blend as u32).to_ne_bytes());
-      params[8..12].copy_from_slice(&u32::from(clipped).to_ne_bytes());
-      params[12..16].copy_from_slice(&u32::from(layer.mask.is_some()).to_ne_bytes());
-      // Without a mask the binding still needs a texture; the shader does not read it.
-      let mask = &self.layers[&layer.mask.as_ref().map_or(layer.id, |m| m.id)].view;
-      queue.write_buffer(&gpu.params, 0, &params);
-      let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &self.composite_layout,
-        entries: &[
-          wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&self.stack[target].1) },
-          wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gpu.view) },
-          wgpu::BindGroupEntry { binding: 2, resource: gpu.params.as_entire_binding() },
-          wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&self.layers[&base_id].view) },
-          wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(mask) },
-        ],
-      });
-      target = 1 - target;
-      pass(&mut encoder, &self.stack[target].1, Some((&self.composite_pipeline, &group)));
     }
     queue.submit([encoder.finish()]);
+    let target = current[0];
     if self.result != target {
       self.result = target;
-      self.display_group = display_group(device, &self.display_layout, &self.stack[target].1, &self.sampler, &self.view_buffer);
+      self.display_group = display_group(device, &self.display_layout, &self.stacks[0][target].1, &self.sampler, &self.view_buffer);
     }
   }
 
@@ -242,7 +276,66 @@ impl CanvasRenderer {
 
   /// The finished composite, for tests and future readback (export of what is on screen).
   pub fn composite_texture(&self) -> &wgpu::Texture {
-    &self.stack[self.result].0
+    &self.stacks[0][self.result].0
+  }
+}
+
+/// One layer's part in a composite: (id, opacity bits, hidden, blend, clip, mask id, group).
+type Composed = (u64, u32, bool, BlendMode, bool, Option<u64>, Option<u64>);
+
+/// Where a composite pass reads a layer's pixels from.
+#[derive(Clone, Copy)]
+enum Source {
+  Layer(u64),
+  /// The current result of a depth: a group just composited.
+  Group(usize),
+  /// The kept copy of a group result at a depth (a clipping base).
+  Base(usize),
+}
+
+enum Step {
+  Clear(usize),
+  /// Copies the group just composited (one depth deeper) into this depth's base.
+  KeepBase(usize),
+  Draw {
+    depth: usize,
+    index: usize,
+    source: Source,
+    base: Source,
+    clipped: bool,
+  },
+}
+
+/// The passes for the layers in `range` whose group is `parent`, like
+/// `Document::composite_tile` on the CPU: a group's children are composited one depth deeper
+/// first, then the result is drawn like a layer.
+fn plan(layers: &[Layer], parent: Option<u64>, range: std::ops::Range<usize>, depth: usize, steps: &mut Vec<Step>) {
+  steps.push(Step::Clear(depth));
+  let mut base: Option<Source> = None;
+  let mut first = true;
+  for i in range {
+    let layer = &layers[i];
+    if layer.parent() != parent {
+      continue;
+    }
+    let clipped = layer.clip && !first;
+    first = false;
+    let source = if layer.is_group() { Source::Group(depth + 1) } else { Source::Layer(layer.id) };
+    if layer.is_group() && !layer.hidden {
+      plan(layers, Some(layer.id), rustcreate_core::group_span(layers, i), depth + 1, steps);
+    }
+    if !clipped {
+      base = (!layer.hidden).then(|| {
+        if layer.is_group() {
+          steps.push(Step::KeepBase(depth));
+          Source::Base(depth)
+        } else {
+          source
+        }
+      });
+    }
+    let Some(base) = base.filter(|_| !layer.hidden) else { continue };
+    steps.push(Step::Draw { depth, index: i, source, base, clipped });
   }
 }
 
@@ -254,7 +347,10 @@ fn stack_texture(device: &wgpu::Device, width: u32, height: u32) -> (wgpu::Textu
     sample_count: 1,
     dimension: wgpu::TextureDimension::D2,
     format: FORMAT,
-    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+      | wgpu::TextureUsages::TEXTURE_BINDING
+      | wgpu::TextureUsages::COPY_SRC
+      | wgpu::TextureUsages::COPY_DST,
     view_formats: &[],
   });
   let view = texture.create_view(&Default::default());

@@ -31,7 +31,8 @@ impl Document {
   // mask too (or target it, like painting) when that is missed.
   pub fn begin_transform(&mut self) -> Option<Transform> {
     let layer = &self.layers[self.active];
-    if layer.locked {
+    // shortcut: a group can't be transformed yet (its children would have to move together).
+    if layer.locked || layer.group {
       return None;
     }
     let selection = self.selection.clone();

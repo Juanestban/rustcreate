@@ -552,6 +552,11 @@ impl App {
         // A clipped layer is marked with an arrow into the layer below.
         let name = layer.name.clone();
         let mut shown = if layer.clip && index > 0 { format!("↳ {name}") } else { name.clone() };
+        if layer.is_group() {
+          shown = format!("▸ {shown}");
+        }
+        // Children are indented under their group.
+        let indent = self.doc.depth(index) as f32 * 14.0;
         if layer.mask.is_some() {
           shown.push_str(" ◐");
         }
@@ -563,6 +568,7 @@ impl App {
           .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
+              ui.add_space(indent);
               let renaming = self.renaming.as_ref().is_some_and(|(layer, _)| *layer == id);
               if renaming {
                 let (_, text) = self.renaming.as_mut().expect("renaming");
@@ -676,6 +682,12 @@ impl App {
       }
       if icons::button(ui, Icon::Trash, false, self.doc.layers().len() > 1, &self.i18n.tr("ui-layer-delete")).clicked() {
         self.doc.delete_layer(index);
+      }
+      if ui.button(self.i18n.tr("ui-layer-group")).on_hover_text("Ctrl+G").clicked() {
+        self.doc.group_layer(index);
+      }
+      if self.doc.layers()[index].is_group() && ui.button(self.i18n.tr("ui-layer-ungroup")).on_hover_text("Ctrl+Shift+G").clicked() {
+        self.doc.ungroup(index);
       }
     });
   }

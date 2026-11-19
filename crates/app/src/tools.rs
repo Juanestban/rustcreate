@@ -224,6 +224,13 @@ fn layer_shortcuts(input: &mut InputState, doc: &mut Document) {
     }
   }
   let top = doc.layers().len() - 1;
+  // Ctrl+Shift+G before Ctrl+G, which would match it too (Ctrl+Alt+G is taken above).
+  if input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::G) {
+    doc.ungroup(active);
+  }
+  if input.consume_key(Modifiers::COMMAND, Key::G) {
+    doc.group_layer(active);
+  }
   if input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::N) {
     doc.add_layer();
   }
@@ -233,11 +240,11 @@ fn layer_shortcuts(input: &mut InputState, doc: &mut Document) {
   if input.consume_key(Modifiers::COMMAND, Key::E) {
     doc.merge_down(active);
   }
-  if input.consume_key(Modifiers::COMMAND, Key::OpenBracket) && active > 0 {
-    doc.move_layer(active, active - 1);
+  if input.consume_key(Modifiers::COMMAND, Key::OpenBracket) {
+    doc.move_down(active);
   }
-  if input.consume_key(Modifiers::COMMAND, Key::CloseBracket) && active < top {
-    doc.move_layer(active, active + 1);
+  if input.consume_key(Modifiers::COMMAND, Key::CloseBracket) {
+    doc.move_up(active);
   }
   // Before the plain [ ]: Alt+[ would match them too.
   if input.consume_key(Modifiers::ALT, Key::OpenBracket) {

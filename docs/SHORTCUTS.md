@@ -69,7 +69,8 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Ctrl+Shift+N` | New layer | ✅ |
 | `Ctrl+J` | Duplicate layer | ✅ |
 | `Ctrl+E` | Merge down | ✅ |
-| `Ctrl+G` | Group layers | 🕓 |
+| `Ctrl+G` | Group layers | ✅ |
+| `Ctrl+Shift+G` | Ungroup | ✅ |
 | `Ctrl+Alt+G` | Clipping mask | ✅ |
 | `/` | Alpha Lock (lock transparent pixels) | ✅ |
 | `Ctrl+[` / `Ctrl+]` | Move layer down / up | ✅ |

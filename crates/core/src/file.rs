@@ -66,6 +66,11 @@ struct LayerInfo {
   /// The layer has `masks/{id}.png`.
   #[serde(default)]
   mask: bool,
+  /// A group: no `layers/{id}.png`.
+  #[serde(default)]
+  group: bool,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  parent: Option<u64>,
   id: u64,
   name: String,
   opacity: f32,
@@ -104,6 +109,8 @@ impl Document {
           alpha_lock: l.alpha_lock,
           clip: l.clip,
           mask: l.mask.is_some(),
+          group: l.group,
+          parent: l.parent,
           id: l.id,
           name: l.name.clone(),
           opacity: l.opacity,
@@ -118,8 +125,10 @@ impl Document {
     serde_json::to_writer_pretty(&mut zip, &manifest)?;
 
     for layer in &self.layers {
-      zip.start_file(format!("layers/{}.png", layer.id), stored)?;
-      write_png(&mut zip, self.width, self.height, png::Compression::Fast, |tx, ty| layer.tile(tx, ty).map(Cow::Borrowed))?;
+      if !layer.group {
+        zip.start_file(format!("layers/{}.png", layer.id), stored)?;
+        write_png(&mut zip, self.width, self.height, png::Compression::Fast, |tx, ty| layer.tile(tx, ty).map(Cow::Borrowed))?;
+      }
       if let Some(mask) = &layer.mask {
         zip.start_file(format!("masks/{}.png", layer.id), stored)?;
         write_png(&mut zip, self.width, self.height, png::Compression::Fast, |tx, ty| mask.tile(tx, ty).map(Cow::Borrowed))?;
@@ -160,15 +169,18 @@ impl Document {
       if doc.layers.iter().any(|l| l.id == info.id) {
         return Err(invalid(format!("layer id {} repeated", info.id)));
       }
-      let mut png = Vec::new();
-      zip.by_name(&format!("layers/{}.png", info.id))?.read_to_end(&mut png)?;
       let mut layer = Layer::new(info.id, info.name);
+      (layer.group, layer.parent) = (info.group, info.parent);
       layer.opacity = if info.opacity.is_finite() { info.opacity.clamp(0.0, 1.0) } else { 1.0 };
       layer.hidden = info.hidden;
       layer.locked = info.locked;
       (layer.alpha_lock, layer.clip) = (info.alpha_lock, info.clip);
       layer.blend = info.blend;
-      read_layer_png(&png, doc.width, doc.height, &mut layer)?;
+      if !layer.group {
+        let mut png = Vec::new();
+        zip.by_name(&format!("layers/{}.png", info.id))?.read_to_end(&mut png)?;
+        read_layer_png(&png, doc.width, doc.height, &mut layer)?;
+      }
       if info.mask {
         let mut png = Vec::new();
         zip.by_name(&format!("masks/{}.png", info.id))?.read_to_end(&mut png)?;
@@ -178,6 +190,9 @@ impl Document {
         layer.mask = Some(Box::new(mask));
       }
       doc.layers.push(layer);
+    }
+    if !crate::group::groups_valid(&doc.layers) || doc.layers.iter().all(|l| l.group) {
+      return Err(invalid("layer groups do not nest properly"));
     }
     doc.next_id = doc.layers.iter().map(|l| l.id).max().unwrap_or(0) + 1;
     for i in 0..doc.layers.len() {
@@ -201,29 +216,46 @@ impl Document {
   /// The visible layers of one tile blended together (premultiplied), or `None` if no visible
   /// layer painted it.
   pub fn composite_tile(&self, tx: u32, ty: u32) -> Option<Vec<u8>> {
+    self.composite_level(None, 0..self.layers.len(), tx, ty)
+  }
+
+  /// The layers in `range` whose group is `parent`, blended together; a group in there is
+  /// composited on its own first (the GPU does the same in `render`).
+  fn composite_level(&self, parent: Option<u64>, range: std::ops::Range<usize>, tx: u32, ty: u32) -> Option<Vec<u8>> {
     let mut out: Option<Vec<u8>> = None;
-    // The base of a clipping group: its tile, and whether it shows at all.
+    // The base of a clipping group: its pixels, and whether it shows at all.
     // shortcut: clipping follows the base's paint, not its mask (the GPU does the same); pass
     // the base's mask along if people mask clipping bases.
-    let mut base: (Option<&[u8]>, bool) = (None, false);
-    for (i, layer) in self.layers.iter().enumerate() {
-      let clipped = layer.clip && i > 0;
+    let mut base: (Option<Cow<[u8]>>, bool) = (None, false);
+    let mut first = true;
+    for i in range {
+      let layer = &self.layers[i];
+      if layer.parent != parent {
+        continue;
+      }
+      let clipped = layer.clip && !first;
+      first = false;
+      let pixels: Option<Cow<[u8]>> = if layer.group {
+        if layer.hidden { None } else { self.composite_level(Some(layer.id), crate::group_span(&self.layers, i), tx, ty).map(Cow::Owned) }
+      } else {
+        layer.tile(tx, ty).map(Cow::Borrowed)
+      };
       if !clipped {
-        base = (layer.tile(tx, ty), !layer.hidden);
+        base = (pixels.clone(), !layer.hidden);
       }
       if layer.hidden || (clipped && !base.1) {
         continue;
       }
-      let Some(tile) = layer.tile(tx, ty) else { continue };
-      let tile = &*blend::masked(tile, layer.mask.as_deref(), tx, ty);
+      let Some(pixels) = pixels else { continue };
+      let pixels = &*blend::masked(&pixels, layer.mask.as_deref(), tx, ty);
       let out = out.get_or_insert_with(|| vec![0; TILE_BYTES]);
       if clipped {
         // Only where the base has paint: scale the clipped layer by the base's alpha.
-        let Some(under) = base.0 else { continue };
-        let masked = blend::clip(tile, under);
+        let Some(under) = &base.0 else { continue };
+        let masked = blend::clip(pixels, under);
         blend::composite(out, &masked, layer.opacity, layer.blend);
       } else {
-        blend::composite(out, tile, layer.opacity, layer.blend);
+        blend::composite(out, pixels, layer.opacity, layer.blend);
       }
     }
     out

@@ -69,7 +69,7 @@ impl Document {
   /// antialiased edges, painted behind what is there, so line art keeps its edges without a
   /// light halo. `false` if nothing was filled (outside, locked).
   pub fn fill(&mut self, x: u32, y: u32, color: [u8; 3], threshold: f32, all_layers: bool) -> bool {
-    if x >= self.width || y >= self.height || self.layers[self.active].locked {
+    if x >= self.width || y >= self.height || !self.paintable() {
       return false;
     }
     let mask = {
@@ -133,7 +133,7 @@ impl Document {
   /// Starts a gradient on the active layer, as one undo step. `None` if it is locked. `colors`
   /// are straight sRGB + alpha for the start and the end.
   pub fn begin_gradient(&mut self, kind: GradientKind, colors: [[u8; 4]; 2]) -> Option<Gradient> {
-    if self.layers[self.active].locked {
+    if !self.paintable() {
       return None;
     }
     let gray = |c: [u8; 4]| {

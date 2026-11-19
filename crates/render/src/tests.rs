@@ -111,3 +111,56 @@ fn gpu_composite_matches_the_cpu_reference() {
   let cpu = doc.composite_tile(0, 0).unwrap();
   assert!(gpu.iter().zip(cpu.chunks(TILE as usize * 4).flat_map(|row| &row[..width as usize * 4])).all(|(g, c)| g.abs_diff(*c) <= 2));
 }
+
+#[test]
+fn gpu_groups_match_the_cpu_reference() {
+  let Some((device, queue)) = device() else {
+    eprintln!("no GPU adapter: skipping");
+    return;
+  };
+  let (width, height) = (64, 4);
+  let mut doc = Document::new(width, height);
+  let paint = |doc: &mut Document, index: usize, color: [u8; 3]| {
+    let tile = doc.layer_mut(index).unwrap().tile_mut(0, 0);
+    for y in 0..height as usize {
+      for x in 0..width as usize {
+        let a = (x * 4) as u8 | 3;
+        let p = (y * TILE as usize + x) * 4;
+        let c = color.map(|c| (c as u32 * a as u32 / 255) as u8);
+        tile[p..p + 4].copy_from_slice(&[c[0], c[1], c[2], a]);
+      }
+    }
+  };
+  paint(&mut doc, 0, [250, 240, 200]);
+  // A group holding a Multiply layer, with a group nested in it; then a layer clipped to the group.
+  doc.add_layer();
+  paint(&mut doc, 1, [40, 120, 220]);
+  doc.layer_mut(1).unwrap().blend = BlendMode::Multiply;
+  doc.add_layer();
+  paint(&mut doc, 2, [220, 60, 40]);
+  doc.group_layer(2); // inner group at 3
+  doc.select(1);
+  doc.group_layer(1); // outer group holds layer 1 only, at 2
+  let outer = doc.layers()[2].id;
+  doc.layer_mut(2).unwrap().opacity = 0.7;
+  doc.layer_mut(2).unwrap().blend = BlendMode::Screen;
+  doc.select(4);
+  doc.layer_mut(4).unwrap().opacity = 0.6;
+  doc.add_layer();
+  paint(&mut doc, 5, [10, 200, 90]);
+  doc.layer_mut(5).unwrap().clip = true;
+  assert!(doc.layers().iter().any(|l| l.parent() == Some(outer)));
+  assert!(doc.layers().iter().filter(|l| l.is_group()).count() == 2);
+
+  let mut renderer = CanvasRenderer::new(&device, wgpu::TextureFormat::Bgra8Unorm, (width, height));
+  renderer.sync(&device, &queue, &mut doc);
+  let gpu = read_back(&device, &queue, renderer.composite_texture(), (width, height));
+  let cpu = doc.composite_tile(0, 0).unwrap();
+  for y in 0..height as usize {
+    for x in 0..width as usize {
+      let g = &gpu[(y * width as usize + x) * 4..][..4];
+      let c = &cpu[(y * TILE as usize + x) * 4..][..4];
+      assert!(g.iter().zip(c).all(|(g, c)| g.abs_diff(*c) <= 2), "({x}, {y}): gpu {g:?} cpu {c:?}");
+    }
+  }
+}

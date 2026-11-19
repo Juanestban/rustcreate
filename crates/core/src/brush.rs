@@ -320,7 +320,7 @@ impl Document {
   /// Starts a stroke on the active layer, as one undo step. `None` if the layer is locked.
   /// `erase` removes paint with the brush's shape instead of adding `color`.
   pub fn begin_stroke(&mut self, brush: Brush, color: [u8; 3], erase: bool) -> Option<Stroke> {
-    if self.layers[self.active].locked {
+    if !self.paintable() {
       return None;
     }
     let color = self.paint_color(color);

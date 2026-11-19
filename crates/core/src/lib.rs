@@ -5,6 +5,7 @@ pub mod blend;
 mod brush;
 mod file;
 mod fill;
+mod group;
 mod guide;
 mod history;
 mod import;
@@ -22,6 +23,7 @@ pub use adjust::{Adjust, Adjustment, curve};
 pub use brush::{Brush, Stroke};
 pub use file::{FORMAT, FileError};
 pub use fill::{Gradient, GradientKind};
+pub use group::group_span;
 pub use guide::Symmetry;
 pub use history::History;
 use history::Snapshot;
@@ -117,6 +119,10 @@ pub struct Layer {
   /// Layer mask: grayscale, black hides and white shows. Stored like a layer whose missing
   /// (transparent) pixels count as white, so an empty mask shows everything.
   pub mask: Option<Box<Layer>>,
+  /// A group: no pixels of its own, its children sit right below it (see `group.rs`).
+  pub(crate) group: bool,
+  /// The group this layer is in.
+  pub(crate) parent: Option<u64>,
   /// Only tiles that were painted exist; a missing tile is fully transparent.
   tiles: HashMap<(u32, u32), Tile>,
   /// Tiles written through `tile_mut` since the renderer last looked (see `take_dirty`).
@@ -135,6 +141,8 @@ impl Layer {
       alpha_lock: false,
       clip: false,
       mask: None,
+      group: false,
+      parent: None,
       tiles: HashMap::new(),
       dirty: HashSet::new(),
     }
@@ -304,46 +312,27 @@ impl Document {
     moved
   }
 
-  /// A new empty layer above the active one, which becomes active.
+  /// A new empty layer above the active one, which becomes active. With a group active it goes
+  /// in the group, on top; otherwise in the active layer's group.
   pub fn add_layer(&mut self) {
     self.checkpoint();
-    let layer = self.new_layer();
-    self.active += 1;
+    let mut layer = self.new_layer();
+    let active = &self.layers[self.active];
+    if active.group {
+      layer.parent = Some(active.id);
+    } else {
+      layer.parent = active.parent;
+      self.active += 1;
+    }
     self.layers.insert(self.active, layer);
-  }
-
-  /// Deletes a layer. The last remaining layer can't be deleted.
-  pub fn delete_layer(&mut self, index: usize) -> bool {
-    if self.layers.len() == 1 || index >= self.layers.len() {
-      return false;
-    }
-    self.checkpoint();
-    self.layers.remove(index);
-    if self.active > index || self.active == self.layers.len() {
-      self.active -= 1;
-    }
-    true
-  }
-
-  /// A copy above the original, which becomes active. Tiles are shared until painted.
-  pub fn duplicate_layer(&mut self, index: usize) -> bool {
-    let Some(original) = self.layers.get(index) else { return false };
-    let mut copy = original.clone();
-    self.checkpoint();
-    copy.id = self.take_id();
-    if let Some(mask) = &mut copy.mask {
-      mask.id = self.take_id();
-    }
-    copy.name = format!("{} copy", copy.name);
-    self.layers.insert(index + 1, copy);
-    self.active = index + 1;
-    true
+    self.editing_mask = false;
   }
 
   /// Moves a layer to another position in the stack; the active layer follows its content.
+  /// Only without groups (it could break one apart): use `move_up` and `move_down`.
   pub fn move_layer(&mut self, from: usize, to: usize) -> bool {
     let len = self.layers.len();
-    if from >= len || to >= len || from == to {
+    if from >= len || to >= len || from == to || self.layers.iter().any(|l| l.group || l.parent.is_some()) {
       return false;
     }
     let active_id = self.layers[self.active].id;
@@ -358,6 +347,11 @@ impl Document {
   /// Merge Down: the result keeps the lower layer's name and properties.
   pub fn merge_down(&mut self, index: usize) -> bool {
     if index == 0 || index >= self.layers.len() {
+      return false;
+    }
+    // Two plain layers side by side in the same group.
+    let (upper, lower) = (&self.layers[index], &self.layers[index - 1]);
+    if upper.group || lower.group || upper.parent != lower.parent {
       return false;
     }
     self.checkpoint();

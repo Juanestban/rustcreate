@@ -201,7 +201,7 @@ impl Document {
   /// Starts adjusting the active layer (or the mask being edited), as one undo step. `None` if
   /// the layer is locked or empty.
   pub fn begin_adjust(&mut self) -> Option<Adjust> {
-    if self.layers[self.active].locked {
+    if !self.paintable() {
       return None;
     }
     let mask = self.editing_mask();

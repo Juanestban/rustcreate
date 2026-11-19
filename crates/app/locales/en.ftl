@@ -295,3 +295,5 @@ ui-image-size = Image size…
 ui-resize-keep = Keep proportions
 ui-resize-anchor = Anchor: the part of the canvas that stays put
 ui-resize-apply = Apply
+ui-layer-group = Group
+ui-layer-ungroup = Ungroup

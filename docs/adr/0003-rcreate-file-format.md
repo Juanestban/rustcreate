@@ -9,6 +9,8 @@ Documents need to store layers losslessly with their properties, open fast, be e
 and grow later to animation frames, masks and adjustment layers. Optional per-layer fields
 (`alpha_lock`, `clip`, `mask`) default to `false` when missing, so they did not bump FORMAT. A
 layer with `mask: true` has its mask in `masks/{id}.png` (gray; transparent counts as white).
+A group has `group: true` and no `layers/{id}.png`; a layer in a group names it in `parent`.
+Children sit right below their group in the list; files where they do not are rejected.
 
 ## Decision
 
