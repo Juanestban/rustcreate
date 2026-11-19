@@ -55,6 +55,7 @@ impl Document {
     let (x0, y0, x1, y1) = bounds?;
     let (w, h) = (x1 - x0 + 1, y1 - y0 + 1);
     self.checkpoint();
+    self.rasterize_text();
     let layer = &mut self.layers[self.active];
     let mut source = vec![[0.0f32; 4]; (w * h) as usize];
     for ty in y0 / TILE..=y1 / TILE {

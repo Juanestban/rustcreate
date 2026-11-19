@@ -35,7 +35,11 @@
   zoomed out and shows crisp pixels only from 3×; the hue ring has soft edges. Layer rows are
   taller with centered names, rename by double click or right click. `rustcreate-core` builds
   optimized in dev too.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 3: text layers next.
+- **Text layers (2026-11-18):** `core::text` draws text with the system's fonts (fontdb +
+  ab_glyph) into the layer; the text is kept on the layer and in the file, so it stays editable
+  until a pixel edit rasterizes it.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 3: PSD import/export and
+  JPEG/WebP export next.
 
 ## Phase 0 — Foundation
 
@@ -167,7 +171,9 @@ The Photoshop features people use most, in this order:
       shrinking): layers, masks and the selection; undo restores the old size
 - [x] Layer groups with their own blend mode, opacity and mask, nestable; Ctrl+[ / Ctrl+] step
       in and out of groups; a group composites its children on their own (no pass-through yet)
-- [ ] Text layers
+- [x] Text layers (T): system fonts, size, color, multi-line; click to add, click one to edit,
+      drag to move; painting, filling, adjusting or transforming one rasterizes it (no shaping
+      for complex scripts yet)
 - [ ] PSD import/export, JPEG/WebP export
 
 Later: adjustment layers, warp/distort and liquify, motion blur and chromatic aberration,

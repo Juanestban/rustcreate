@@ -20,6 +20,8 @@ pub enum Tool {
   Fill,
   Gradient,
   Select,
+  /// Text layers (T): a click adds one, a click on one edits it.
+  Text,
 }
 
 /// How the selection tool selects (M, L, W in Photoshop).
@@ -69,6 +71,9 @@ pub struct Tools {
   pub select_kind: SelectKind,
   /// Feather radius in canvas pixels for the Feather button.
   pub feather: f32,
+  /// The font family and size (pixels) new text starts with: the last ones used.
+  pub text_font: String,
+  pub text_size: f32,
 }
 
 impl Default for Tools {
@@ -89,6 +94,8 @@ impl Default for Tools {
       recent: Vec::new(),
       select_kind: SelectKind::Rectangle,
       feather: 10.0,
+      text_font: "Arial".into(),
+      text_size: 64.0,
     }
   }
 }
@@ -146,6 +153,9 @@ impl Tools {
     if input.consume_key(Modifiers::NONE, Key::G) {
       self.tool = if self.tool == Tool::Fill { Tool::Gradient } else { Tool::Fill };
       self.hand = false;
+    }
+    if input.consume_key(Modifiers::NONE, Key::T) {
+      (self.tool, self.hand) = (Tool::Text, false);
     }
     if input.consume_key(Modifiers::NONE, Key::I) {
       self.picking = !self.picking;

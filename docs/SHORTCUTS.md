@@ -22,7 +22,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `W` | Magic wand | ✅ |
 | `Shift` / `Alt` + selection drag | Add to / subtract from the selection | ✅ |
 | `V` | Move | 🕓 |
-| `T` | Text | 🕓 |
+| `T` | Text (click to add, click a text to edit, drag to move; Ctrl+Enter or Esc finishes) | ✅ |
 | `C` | Crop tool (drag a frame; for now: Actions → Crop to selection) | 🕓 |
 
 ## Brush

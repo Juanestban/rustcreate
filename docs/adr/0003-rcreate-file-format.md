@@ -11,6 +11,8 @@ and grow later to animation frames, masks and adjustment layers. Optional per-la
 layer with `mask: true` has its mask in `masks/{id}.png` (gray; transparent counts as white).
 A group has `group: true` and no `layers/{id}.png`; a layer in a group names it in `parent`.
 Children sit right below their group in the list; files where they do not are rejected.
+A text layer also has `text` (`text`, `font`, `size`, `color`, `position`); its pixels are still
+in `layers/{id}.png`, so it looks the same where the font is missing.
 
 ## Decision
 

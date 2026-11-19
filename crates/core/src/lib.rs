@@ -13,6 +13,7 @@ mod resize;
 mod selection;
 mod shape;
 mod swatches;
+mod text;
 pub mod tip;
 mod transform;
 
@@ -31,6 +32,7 @@ pub use import::{BrushImage, Imported, export_brushes, import_abr, import_brushs
 pub use selection::{SelectMode, SelectShape, Selection};
 pub use shape::Shape;
 pub use swatches::{SwatchFormat, Swatches, export_swatches, import_swatches};
+pub use text::{Text, font_families, text_bounds};
 pub use tip::{Grain, Tip};
 pub use transform::{Affine, IDENTITY, Transform};
 
@@ -123,6 +125,9 @@ pub struct Layer {
   pub(crate) group: bool,
   /// The group this layer is in.
   pub(crate) parent: Option<u64>,
+  /// A text layer: its pixels are this text, drawn by `Document::set_text`. Any other edit of
+  /// its pixels turns it into a plain layer (Photoshop's Rasterize).
+  pub(crate) text: Option<Box<Text>>,
   /// Only tiles that were painted exist; a missing tile is fully transparent.
   tiles: HashMap<(u32, u32), Tile>,
   /// Tiles written through `tile_mut` since the renderer last looked (see `take_dirty`).
@@ -143,6 +148,7 @@ impl Layer {
       mask: None,
       group: false,
       parent: None,
+      text: None,
       tiles: HashMap::new(),
       dirty: HashSet::new(),
     }
@@ -288,7 +294,7 @@ impl Document {
 
   /// Goes back to the state before the last `checkpoint` and forgets that step, as if the
   /// change never happened (a cancelled transform).
-  pub(crate) fn rollback(&mut self) {
+  pub fn rollback(&mut self) {
     if let Some(state) = self.history.pop() {
       self.layers = state.layers;
       self.active = state.active;
@@ -357,6 +363,7 @@ impl Document {
     self.checkpoint();
     let upper = self.layers.remove(index);
     let lower = &mut self.layers[index - 1];
+    lower.text = None;
     if !upper.hidden {
       for (&(tx, ty), tile) in &upper.tiles {
         let tile = &*blend::masked(tile, upper.mask.as_deref(), tx, ty);
@@ -384,6 +391,7 @@ impl Document {
     }
     self.checkpoint();
     self.layers[index].tiles.clear();
+    self.layers[index].text = None;
     true
   }
 

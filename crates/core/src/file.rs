@@ -15,7 +15,7 @@ use thiserror::Error;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use crate::{BlendMode, Document, History, Layer, MAX_SIDE, TILE, TILE_BYTES, blend};
+use crate::{BlendMode, Document, History, Layer, MAX_SIDE, TILE, TILE_BYTES, Text, blend};
 
 /// The `format` this version writes and the newest it reads.
 pub const FORMAT: u32 = 1;
@@ -71,6 +71,10 @@ struct LayerInfo {
   group: bool,
   #[serde(default, skip_serializing_if = "Option::is_none")]
   parent: Option<u64>,
+  /// A text layer's text; its pixels are in `layers/{id}.png` as usual, so a missing font
+  /// still shows the same picture.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  text: Option<Text>,
   id: u64,
   name: String,
   opacity: f32,
@@ -111,6 +115,7 @@ impl Document {
           mask: l.mask.is_some(),
           group: l.group,
           parent: l.parent,
+          text: l.text.as_deref().cloned(),
           id: l.id,
           name: l.name.clone(),
           opacity: l.opacity,
@@ -176,6 +181,7 @@ impl Document {
       layer.locked = info.locked;
       (layer.alpha_lock, layer.clip) = (info.alpha_lock, info.clip);
       layer.blend = info.blend;
+      layer.text = info.text.filter(|_| !info.group).map(Box::new);
       if !layer.group {
         let mut png = Vec::new();
         zip.by_name(&format!("layers/{}.png", info.id))?.read_to_end(&mut png)?;

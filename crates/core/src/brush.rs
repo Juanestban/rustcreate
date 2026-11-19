@@ -327,6 +327,7 @@ impl Document {
     let layer = self.target();
     let (layer_id, alpha_lock) = (layer.id, layer.alpha_lock);
     self.checkpoint();
+    self.rasterize_text();
     Some(Stroke {
       brush,
       color,

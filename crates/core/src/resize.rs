@@ -15,6 +15,9 @@ impl Document {
       return false;
     }
     self.checkpoint();
+    // shortcut: text layers become plain pixels when the canvas changes size; move and scale the
+    // text instead if re-editing after a crop is missed.
+    self.layers.iter_mut().for_each(|l| l.text = None);
     let (old_w, old_h) = (self.width as usize, self.height as usize);
     let (w, h) = (width as usize, height as usize);
     // Copies the overlapping rows of a `channels`-per-pixel image into the new frame.
@@ -75,6 +78,9 @@ impl Document {
       return false;
     }
     self.checkpoint();
+    // shortcut: text layers become plain pixels when the canvas changes size; move and scale the
+    // text instead if re-editing after a crop is missed.
+    self.layers.iter_mut().for_each(|l| l.text = None);
     let (old, new) = ((self.width as usize, self.height as usize), (width as usize, height as usize));
     for layer in &mut self.layers {
       if !layer.tiles.is_empty() {

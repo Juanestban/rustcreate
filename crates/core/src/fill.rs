@@ -79,6 +79,7 @@ impl Document {
     let Some((x0, y0, x1, y1)) = mask.1 else { return false };
     let mask = mask.0;
     self.checkpoint();
+    self.rasterize_text();
     let (width, height) = (self.width, self.height);
     let selection = self.selection.clone();
     let color = self.paint_color(color);
@@ -144,6 +145,7 @@ impl Document {
     let layer = self.target();
     let (layer_id, before) = (layer.id, layer.tiles.clone());
     self.checkpoint();
+    self.rasterize_text();
     Some(Gradient { layer_id, before, kind, colors })
   }
 

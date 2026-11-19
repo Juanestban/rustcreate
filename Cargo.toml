@@ -19,7 +19,9 @@ eframe = { version = "0.37", default-features = false, features = [
   "wayland",
   "x11",
 ] }
+ab_glyph = "0.2"
 fluent-bundle = "0.16"
+fontdb = "0.23"
 png = "0.18"
 pollster = "0.4"
 raw-window-handle = "0.6"

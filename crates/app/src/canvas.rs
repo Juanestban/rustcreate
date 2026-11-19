@@ -3,7 +3,7 @@
 
 use eframe::egui::{self, Event, Key, Modifiers, Pos2, Rect, Vec2, vec2};
 use eframe::egui_wgpu::{self, wgpu};
-use rustcreate_core::{Affine, Document, Gradient, SelectMode, SelectShape, Selection, Shape, Stroke, Transform};
+use rustcreate_core::{Affine, Document, Gradient, SelectMode, SelectShape, Selection, Shape, Stroke, Text, Transform, text_bounds};
 
 /// QuickShape: how long the pointer must rest, and how far (points) it may drift meanwhile.
 const HOLD_SECONDS: f64 = 0.6;
@@ -113,6 +113,20 @@ pub struct Canvas {
   ants: (usize, Vec<[Pos2; 2]>),
   /// Free Transform in progress (Ctrl+T).
   transform: Option<Free>,
+  /// The text layer being typed into, with the Text tool.
+  text: Option<Typing>,
+  /// The system's font families, listed the first time the Text tool is used.
+  fonts: Option<Vec<String>>,
+}
+
+struct Typing {
+  layer: u64,
+  /// Added by this edit: finishing it empty removes it without an undo step.
+  new: bool,
+  /// A drag moving the text: where it started (canvas pixels) and the text's position then.
+  drag: Option<(Pos2, (f32, f32))>,
+  /// The editor takes the keyboard on its next frame.
+  focus: bool,
 }
 
 /// What a Free Transform drag holds.
@@ -212,6 +226,11 @@ fn transform_cursor(ui: &egui::Ui, at: Pos2, grab: Grab, free: &Free, to_canvas:
   ui.ctx().set_cursor_icon(icon);
 }
 
+/// Where the layer with id `id` is in the stack.
+fn layer_index(doc: &Document, id: u64) -> Option<usize> {
+  doc.layers().iter().position(|l| l.id == id)
+}
+
 fn rotate(v: Vec2, angle: f32) -> Vec2 {
   let (sin, cos) = angle.sin_cos();
   vec2(v.x * cos - v.y * sin, v.x * sin + v.y * cos)
@@ -259,6 +278,8 @@ impl Canvas {
       selecting: None,
       ants: (0, Vec::new()),
       transform: None,
+      text: None,
+      fonts: None,
     }
   }
 
@@ -307,6 +328,9 @@ impl Canvas {
     } else if keys && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::T)) && self.stroke.is_none() && self.gradient.is_none() {
       self.start_transform(doc);
     }
+    if self.tools.tool != Tool::Text || self.transform.is_some() {
+      self.end_text(doc);
+    }
     let painting = self.stroke.is_some() || self.gradient.is_some() || self.transform.is_some();
     if keys {
       ui.input_mut(|input| self.tools.shortcuts(input, doc, painting));
@@ -333,6 +357,7 @@ impl Canvas {
     self.tools.guides.draw(&ui.painter_at(rect), canvas, crate::ui::theme::ACCENT.gamma_multiply(0.75), to_screen);
     self.draw_selection(ui, rect, doc, to_screen);
     self.draw_transform(ui, rect, doc, to_screen, i18n);
+    self.draw_text(ui, rect, doc, to_screen, i18n);
     if let Some((at, before)) = self.loupe {
       loupe(ui.painter(), at, self.tools.primary, before);
     }
@@ -358,6 +383,152 @@ impl Canvas {
       for point in [*start, *end] {
         ui.painter().circle(point, 5.0, shadow, line);
       }
+    }
+  }
+
+  /// Text tool presses: on the text being typed a drag moves it; on another text layer it
+  /// starts editing that one; elsewhere on the canvas it adds a new text layer there.
+  fn text_input(
+    &mut self,
+    ui: &egui::Ui,
+    response: &egui::Response,
+    to_canvas: &impl Fn(Pos2) -> Pos2,
+    doc: &mut Document,
+    (pressed, released): (bool, bool),
+    origin: Option<Pos2>,
+  ) {
+    let inside = |text: &Text, p: Pos2| text_bounds(text).is_some_and(|(x0, y0, x1, y1)| (x0..=x1).contains(&p.x) && (y0..=y1).contains(&p.y));
+    let typing = self.text.as_ref().and_then(|t| layer_index(doc, t.layer));
+    if pressed
+      && response.contains_pointer()
+      && let Some(origin) = origin
+    {
+      let p = to_canvas(origin);
+      if let (Some(typing), Some(index)) = (&mut self.text, typing)
+        && let Some(text) = doc.layers()[index].text().filter(|t| inside(t, p))
+      {
+        typing.drag = Some((p, text.position));
+      } else {
+        self.end_text(doc);
+        let hit = (0..doc.layers().len()).rev().find(|&i| {
+          let layer = &doc.layers()[i];
+          !layer.hidden && !layer.locked && layer.text().is_some_and(|t| inside(t, p))
+        });
+        let on_canvas = p.x >= 0.0 && p.y >= 0.0 && p.x < doc.width as f32 && p.y < doc.height as f32;
+        if let Some(index) = hit {
+          doc.select(index);
+          doc.checkpoint();
+          // Its color becomes the current one, so editing does not recolor it.
+          self.tools.primary = doc.layers()[index].text().expect("hit a text").color;
+          self.text = Some(Typing { layer: doc.layers()[index].id, new: false, drag: None, focus: true });
+        } else if on_canvas {
+          let (font, size, color) = (self.tools.text_font.clone(), self.tools.text_size, self.tools.primary);
+          doc.add_text_layer(Text { text: String::new(), font, size, color, position: (p.x, p.y) });
+          self.text = Some(Typing { layer: doc.layers()[doc.active()].id, new: true, drag: None, focus: true });
+        }
+      }
+    }
+    if let Some(typing) = &self.text
+      && let Some((start, from)) = typing.drag
+      && let Some(index) = layer_index(doc, typing.layer)
+      && let Some(now) = ui.input(|i| i.pointer.interact_pos())
+      && let Some(text) = doc.layers()[index].text()
+    {
+      let moved = to_canvas(now) - start;
+      let position = (from.0 + moved.x, from.1 + moved.y);
+      if text.position != position {
+        let text = Text { position, ..text.clone() };
+        doc.set_text(index, text);
+      }
+    }
+    if released && let Some(typing) = &mut self.text {
+      typing.drag = None;
+    }
+    // A text cursor over the canvas, a move cursor over the text being typed.
+    if let Some(at) = ui.input(|i| i.pointer.hover_pos()).filter(|_| response.contains_pointer()) {
+      let over = typing.and_then(|i| doc.layers()[i].text()).is_some_and(|t| inside(t, to_canvas(at)));
+      ui.ctx().set_cursor_icon(if over { egui::CursorIcon::Move } else { egui::CursorIcon::Text });
+    }
+  }
+
+  /// Stops typing: an empty text layer goes away (one added just now leaves no undo step).
+  pub fn end_text(&mut self, doc: &mut Document) {
+    let Some(typing) = self.text.take() else { return };
+    let Some(index) = layer_index(doc, typing.layer) else { return };
+    if doc.layers()[index].text().is_some_and(|t| t.text.trim().is_empty()) {
+      if typing.new {
+        doc.rollback();
+      } else {
+        doc.delete_layer(index);
+      }
+    }
+  }
+
+  /// The box around the text being typed and its editor: the text, font, size and Done. The
+  /// text takes the current color, so picking a color while typing recolors it.
+  fn draw_text(&mut self, ui: &egui::Ui, rect: Rect, doc: &mut Document, to_screen: impl Fn(Pos2) -> Pos2, i18n: &crate::i18n::I18n) {
+    let Some(typing) = &mut self.text else { return };
+    // Undo can take the layer, or its text, away.
+    let Some(index) = layer_index(doc, typing.layer).filter(|&i| doc.layers()[i].text().is_some()) else {
+      self.text = None;
+      return;
+    };
+    let mut text = doc.layers()[index].text().expect("a text layer").clone();
+    let (x0, y0, x1, y1) = text_bounds(&text).unwrap_or((text.position.0, text.position.1, text.position.0, text.position.1));
+    let corners: Vec<Pos2> = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
+      .iter()
+      .map(|&(x, y)| to_screen(Pos2::new(x - 4.0, y) + vec2(if x == x1 { 8.0 } else { 0.0 }, 0.0)))
+      .collect();
+    let painter = ui.painter_at(rect);
+    painter.add(egui::Shape::line(corners.clone(), egui::Stroke::new(3.0, egui::Color32::from_black_alpha(90))));
+    painter.add(egui::Shape::dashed_line(&corners, egui::Stroke::new(1.5, crate::ui::theme::ACCENT), 6.0, 4.0));
+    let below = corners[2].max(corners[3]).max(corners[0]).max(corners[1]);
+    let fonts = self.fonts.get_or_insert_with(rustcreate_core::font_families);
+    let mut done = false;
+    egui::Area::new(egui::Id::unique("text-editor"))
+      .order(egui::Order::Foreground)
+      .fixed_pos(Pos2::new(to_screen(Pos2::new(x0, y1)).x.min(below.x).max(rect.left() + 8.0), below.y + 12.0))
+      .constrain_to(rect)
+      .show(ui.ctx(), |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+          ui.set_width(300.0);
+          let edit =
+            ui.add(egui::TextEdit::multiline(&mut text.text).desired_rows(3).desired_width(f32::INFINITY).hint_text(i18n.tr("ui-text-hint")));
+          if std::mem::take(&mut typing.focus) {
+            edit.request_focus();
+          }
+          if edit.has_focus() && ui.input(|i| i.modifiers.command && i.key_pressed(Key::Enter)) {
+            done = true;
+          }
+          if ui.input(|i| i.key_pressed(Key::Escape)) {
+            done = true;
+          }
+          ui.horizontal(|ui| {
+            ui.label(i18n.tr("ui-text-font"));
+            egui::ComboBox::from_id_salt("text-font").selected_text(&text.font).width(150.0).height(320.0).show_ui(ui, |ui| {
+              for family in fonts.iter() {
+                ui.selectable_value(&mut text.font, family.clone(), egui::RichText::new(family));
+              }
+            });
+          });
+          ui.horizontal(|ui| {
+            ui.label(i18n.tr("ui-text-size"));
+            ui.add(egui::DragValue::new(&mut text.size).range(4.0..=2000.0).speed(0.5).suffix(" px"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+              if ui.button(i18n.tr("ui-text-done")).clicked() {
+                done = true;
+              }
+            });
+          });
+        });
+      });
+    text.color = self.tools.primary;
+    if doc.layers()[index].text() != Some(&text) {
+      (self.tools.text_font, self.tools.text_size) = (text.font.clone(), text.size);
+      doc.set_text(index, text);
+    }
+    if done {
+      self.end_text(doc);
     }
   }
 
@@ -451,6 +622,12 @@ impl Canvas {
       }
       if released {
         self.handle = None;
+      }
+      return;
+    }
+    if self.tools.tool == Tool::Text {
+      if !view_drag {
+        self.text_input(ui, response, &to_canvas, doc, (pressed, released), origin);
       }
       return;
     }

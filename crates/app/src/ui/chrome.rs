@@ -93,6 +93,7 @@ impl App {
             // Right to left: gradient, bucket, eraser, smudge, brush. Clicking the active tool
             // opens its panel: brushes, or the bucket and gradient options.
             for (tool, icon, tooltip) in [
+              (Tool::Text, Icon::Text, "ui-tooltip-text"),
               (Tool::Gradient, Icon::Gradient, "ui-tooltip-gradient"),
               (Tool::Fill, Icon::Bucket, "ui-tooltip-bucket"),
               (Tool::Eraser, Icon::Eraser, "ui-tooltip-eraser"),
@@ -101,7 +102,7 @@ impl App {
             ] {
               let active = self.canvas.tools.tool == tool;
               if icons::button(ui, icon, active, true, &self.i18n.tr(tooltip)).clicked() {
-                if active {
+                if active && tool != Tool::Text {
                   self.toggle(if matches!(tool, Tool::Fill | Tool::Gradient) { Popover::Fill } else { Popover::Brushes });
                 }
                 self.canvas.tools.tool = tool;
@@ -114,9 +115,11 @@ impl App {
   }
 
   fn toggle(&mut self, popover: Popover) {
-    // Panels that change the document apply a transform in progress first; brushes, color,
+    // Panels that change the document finish the text being typed and apply a transform in
+    // progress first; brushes, color,
     // fill and selection options leave it waiting on its bar.
     if matches!(popover, Popover::Layers | Popover::Actions | Popover::Adjust) {
+      self.canvas.end_text(&mut self.doc);
       self.canvas.end_transform(&mut self.doc, true);
     }
     self.popover = if self.popover == Some(popover) { None } else { Some(popover) };

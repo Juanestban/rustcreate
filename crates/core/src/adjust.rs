@@ -215,6 +215,7 @@ impl Document {
       (0..rows).flat_map(|ty| (0..cols).map(move |tx| (tx, ty))).map(|key| (key, layer.tiles.get(&key).cloned())).collect();
     let layer_id = layer.id;
     self.checkpoint();
+    self.rasterize_text();
     Some(Adjust { layer_id, mask, original, selection: self.selection.clone() })
   }
 
