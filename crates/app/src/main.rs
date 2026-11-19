@@ -153,6 +153,9 @@ impl App {
     canvas.tools.library = library::Library::load();
     canvas.tools.quickshape = settings.quickshape;
     pen::install(cc);
+    if settings.wintab && !pen::set_wintab(true) {
+      log::line("wintab: no driver; using Windows Ink");
+    }
     ui::theme::install(&cc.egui_ctx);
     cc.egui_ctx.set_theme(theme_preference(settings.theme));
     Self {
@@ -299,7 +302,7 @@ impl App {
   }
 
   /// Applies changed settings right away and saves them.
-  pub(crate) fn apply(&mut self, settings: Settings) {
+  pub(crate) fn apply(&mut self, mut settings: Settings) {
     if settings.theme != self.settings.theme {
       self.ctx.set_theme(theme_preference(settings.theme));
     }
@@ -311,6 +314,10 @@ impl App {
       self.updates.set_checks(settings.check_updates);
     }
     self.canvas.tools.quickshape = settings.quickshape;
+    if settings.wintab != self.settings.wintab && !pen::set_wintab(settings.wintab) {
+      settings.wintab = false;
+      self.error = Some(self.i18n.tr("ui-wintab-missing"));
+    }
     settings.save();
     self.settings = settings;
   }

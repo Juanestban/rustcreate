@@ -39,6 +39,8 @@ pub struct Settings {
   pub background: Option<[u8; 3]>,
   /// Sizes the user saved on the home screen.
   pub sizes: Vec<SavedSize>,
+  /// Windows: read the pen through Wintab (older tablets) besides Windows Ink.
+  pub wintab: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -95,6 +97,7 @@ impl Default for Settings {
       dpi: 300,
       background: None,
       sizes: Vec::new(),
+      wintab: false,
     }
   }
 }
@@ -152,6 +155,7 @@ mod tests {
       dpi: 150,
       background: None,
       sizes: vec![SavedSize { name: "Card".into(), width: 1050, height: 600, dpi: 300 }],
+      wintab: true,
     };
     let json = serde_json::to_string(&settings).unwrap();
     assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), settings);

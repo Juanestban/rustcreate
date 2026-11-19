@@ -56,7 +56,7 @@ file; do not silently diverge.
 
 ## Input
 
-- Pen through Windows Ink (`WM_POINTER`), mouse fallback; Wintab later
+- Pen through Windows Ink (`WM_POINTER`), mouse fallback; Wintab as an opt-in setting
   ([ADR 0004](adr/0004-pen-input-windows-ink.md)).
 - Keyboard shortcuts follow Photoshop ([SHORTCUTS.md](SHORTCUTS.md)).
 

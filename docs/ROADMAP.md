@@ -52,7 +52,9 @@
   read from `thumbnail.png` only (`Document::read_thumbnail`).
 - **Tabs (2026-11-19):** `tabs.rs`; the shown document stays in `App`'s fields, the others
   wait in `App::tabs`. 16 bits per channel moved to "Technical debt". **Phase 5 is done.**
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 6: more platforms.
+- **Wintab (2026-11-19):** `pen.rs` `wintab` module (ADR 0004). Not tested on a tablet yet.
+- **Next:** v0.1.0 still waits on a Windows test with a pen (Windows Ink and Wintab). Phase 6:
+  macOS (unsigned universal `.app`).
 
 ## Phase 0 — Foundation
 
@@ -228,7 +230,8 @@ color management (Display P3, ICC), TIFF export, reference window, time-lapse re
 
 ## Phase 6 — More platforms
 
-- [ ] Wintab pen input (older tablets)
+- [x] Wintab pen input (older tablets): opt-in in Actions, `wintab32.dll` loaded at run time;
+      pressure, tilt, eraser end, barrel button (not tested on a tablet yet)
 - [ ] macOS (Metal), Apple Pencil on iPad/iPhone
 - [ ] Android (Vulkan, stylus)
 - [ ] Linux (Wayland/X11 tablets)
@@ -239,5 +242,7 @@ color management (Display P3, ICC), TIFF export, reference window, time-lapse re
 - [ ] PSD import and export (layers, groups, masks, blend modes, text as pixels)
 - [ ] Reading the rest of imported brush settings: Procreate `Brush.archive` (a binary plist)
       and ABR descriptors, mapped onto our brush settings
+- [ ] Signing and notarizing the macOS app (needs an Apple Developer account and CI secrets);
+      until then it ships unsigned (right-click → Open the first time)
 - [ ] 16 bits per channel, as a new canvas option: the whole pixel pipeline is 8-bit RGBA today
       (tiles, GPU textures, brushes, the file format)

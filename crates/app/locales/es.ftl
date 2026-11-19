@@ -373,3 +373,6 @@ ui-unit-cm = Centímetros
 ui-unit-mm = Milímetros
 ui-home-swap = Intercambiar
 ui-file-save-all = Guardar todo
+ui-wintab = Lápiz Wintab (tabletas antiguas)
+ui-wintab-help = Para tabletas sin Windows Ink: presión, inclinación, borrador y botón lateral mediante el Wintab del driver de la tableta
+ui-wintab-missing = No se encontró ningún driver Wintab. Instala el driver de tu tableta o sigue con Windows Ink.

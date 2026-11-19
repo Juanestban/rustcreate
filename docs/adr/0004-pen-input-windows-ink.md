@@ -23,10 +23,18 @@ pressure and tilt on Windows (true of older winit versions; 0.30 reads pressure)
   value, 0 upright to 1 flat. Brushes use it for size and flow (Brush Studio). It is sampled once
   per frame, not per coalesced sample.
 - The mouse is the fallback, with a fixed pressure of 1.0.
-- **Wintab** goes to the roadmap for older tablets that do not support Windows Ink.
+- **Wintab** (updated 2026-11-19) is an opt-in setting for older tablets without Windows Ink.
+  `wintab32.dll` comes with the tablet driver and is loaded at run time (no build dependency);
+  a missing driver only turns the setting back off. The context is opened in message mode with
+  the system cursor, so the tablet keeps moving the mouse: strokes come from mouse events and
+  take their pressure from the latest `WT_PACKET`; tilt (altitude), the eraser end
+  (`TPS_INVERT`) and the barrel button go to the same pen state as Windows Ink's. It stays off
+  by default because opening a Wintab context next to Windows Ink can switch some drivers' mode.
 
 ## Consequences
 
-- Works with Wacom, Surface, XP-Pen and Huion in Windows Ink mode.
+- Works with Wacom, Surface, XP-Pen and Huion in Windows Ink mode, and with Wintab-only tablets
+  once the setting is on. Wintab pressure is paired with mouse moves by time, not matched per
+  sample.
 - Input code is Windows-specific and isolated in `crates/app`; other platforms get their own
   backends later.

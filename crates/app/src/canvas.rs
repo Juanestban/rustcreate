@@ -1165,7 +1165,9 @@ fn samples(events: &[Event], pen: &mut Option<f32>) -> Vec<(Pos2, f32)> {
         let lifted = matches!(phase, egui::TouchPhase::End | egui::TouchPhase::Cancel);
         *pen = if lifted { None } else { force.filter(|f| *f > 0.0) };
       }
-      Event::PointerMoved(p) => out.push((*p, pen.unwrap_or(1.0))),
+      // A Wintab pen moves the mouse: its pressure comes from the latest Wintab packet.
+      // shortcut: the packet and the move are paired by time, not matched; fine at tablet rates.
+      Event::PointerMoved(p) => out.push((*p, pen.or_else(crate::pen::wintab_pressure).unwrap_or(1.0))),
       _ => {}
     }
   }

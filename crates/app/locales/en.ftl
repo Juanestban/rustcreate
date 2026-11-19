@@ -373,3 +373,6 @@ ui-unit-cm = Centimeters
 ui-unit-mm = Millimeters
 ui-home-swap = Swap
 ui-file-save-all = Save all
+ui-wintab = Wintab pen (older tablets)
+ui-wintab-help = For tablets without Windows Ink: pressure, tilt, eraser and barrel button through the tablet driver's Wintab
+ui-wintab-missing = No Wintab driver found. Install your tablet's driver, or keep using Windows Ink.

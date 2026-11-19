@@ -451,6 +451,9 @@ impl App {
     });
     ui.checkbox(&mut settings.check_updates, self.i18n.tr("ui-check-updates"));
     ui.checkbox(&mut settings.quickshape, self.i18n.tr("ui-quickshape")).on_hover_text(self.i18n.tr("ui-quickshape-help"));
+    if cfg!(windows) {
+      ui.checkbox(&mut settings.wintab, self.i18n.tr("ui-wintab")).on_hover_text(self.i18n.tr("ui-wintab-help"));
+    }
     if settings != self.settings {
       self.apply(settings);
     }
