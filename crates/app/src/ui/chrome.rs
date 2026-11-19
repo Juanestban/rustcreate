@@ -162,27 +162,31 @@ impl App {
     egui::Panel::left("sidebar")
       .exact_size(theme::SIDEBAR_WIDTH)
       .resizable(false)
-      // Off the window's edge, so the sliders and buttons are not pressed against it.
-      .frame(Frame::NONE.fill(palette.chrome).inner_margin(Margin { left: 12, right: 4, top: 18, bottom: 18 }))
+      // The same margin on both sides keeps the sliders and buttons on the bar's center line.
+      .frame(Frame::NONE.fill(palette.chrome).inner_margin(Margin::symmetric(8, 18)))
       .show(ui, |ui| {
         ui.vertical_centered(|ui| {
           ui.spacing_mut().slider_width = 170.0;
           let brush = self.canvas.tools.brush_mut();
-          ui.add(egui::Slider::new(&mut brush.size, 1.0..=1000.0).logarithmic(true).vertical().show_value(false))
+          ui.put(centered_slider(ui), egui::Slider::new(&mut brush.size, 1.0..=1000.0).logarithmic(true).vertical().show_value(false))
             .on_hover_text(self.i18n.tr_args("ui-size", &[("size", (brush.size.round() as i64).into())]));
-          ui.add_space(14.0);
+          let size = brush.size.round() as i64;
+          ui.label(RichText::new(self.i18n.tr_args("ui-size-value", &[("size", size.into())])).small().color(palette.muted));
+          ui.add_space(10.0);
           let picking = self.canvas.tools.picking;
           if icons::button(ui, Icon::Eyedropper, picking, true, &self.i18n.tr("ui-eyedropper")).clicked() {
             self.canvas.tools.picking = !picking;
           }
-          ui.add_space(14.0);
+          ui.add_space(10.0);
           let brush = self.canvas.tools.brush_mut();
           let mut percent = brush.opacity * 100.0;
-          let opacity = ui.add(egui::Slider::new(&mut percent, 1.0..=100.0).vertical().show_value(false));
+          let opacity = ui.put(centered_slider(ui), egui::Slider::new(&mut percent, 1.0..=100.0).vertical().show_value(false));
           if opacity.changed() {
             brush.opacity = percent / 100.0;
           }
           opacity.on_hover_text(self.i18n.tr_args("ui-opacity", &[("opacity", (percent.round() as i64).into())]));
+          let percent = percent.round() as i64;
+          ui.label(RichText::new(self.i18n.tr_args("ui-opacity-value", &[("opacity", percent.into())])).small().color(palette.muted));
           ui.add_space(18.0);
           let (can_undo, can_redo) = (self.doc.history().can_undo(), self.doc.history().can_redo());
           // Undo while transforming cancels the transform, like Ctrl+Z does.
@@ -865,4 +869,11 @@ enum LayerAction {
   Delete(usize),
   Group(usize),
   Ungroup(usize),
+}
+
+/// Where a sidebar slider goes: on the bar's center line (egui lays a vertical slider out from
+/// the left otherwise).
+fn centered_slider(ui: &egui::Ui) -> egui::Rect {
+  let (width, height) = (ui.spacing().interact_size.y, ui.spacing().slider_width);
+  egui::Rect::from_min_size(egui::pos2(ui.max_rect().center().x - width / 2.0, ui.cursor().top()), vec2(width, height))
 }
