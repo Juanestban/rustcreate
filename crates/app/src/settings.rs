@@ -30,11 +30,72 @@ pub struct Settings {
   pub quickshape: bool,
   /// Files opened or saved lately, newest first (File > Open recent).
   pub recent: Vec<PathBuf>,
+  /// Files kept first on the home screen.
+  pub pinned: Vec<PathBuf>,
+  /// How the home screen's new canvas form measures, and its resolution.
+  pub unit: Unit,
+  pub dpi: u32,
+  /// A new canvas's paper color; `None` = transparent.
+  pub background: Option<[u8; 3]>,
+  /// Sizes the user saved on the home screen.
+  pub sizes: Vec<SavedSize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Unit {
+  #[default]
+  Pixels,
+  Inches,
+  Centimeters,
+  Millimeters,
+}
+
+impl Unit {
+  pub const ALL: [Unit; 4] = [Unit::Pixels, Unit::Inches, Unit::Centimeters, Unit::Millimeters];
+
+  /// Units in one inch.
+  fn per_inch(self, dpi: u32) -> f64 {
+    match self {
+      Unit::Pixels => dpi as f64,
+      Unit::Inches => 1.0,
+      Unit::Centimeters => 2.54,
+      Unit::Millimeters => 25.4,
+    }
+  }
+
+  pub fn to_pixels(self, value: f64, dpi: u32) -> u32 {
+    (value * dpi.max(1) as f64 / self.per_inch(dpi.max(1))).round().max(1.0) as u32
+  }
+
+  pub fn in_units(self, pixels: u32, dpi: u32) -> f64 {
+    pixels as f64 * self.per_inch(dpi.max(1)) / dpi.max(1) as f64
+  }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedSize {
+  pub name: String,
+  pub width: u32,
+  pub height: u32,
+  pub dpi: u32,
 }
 
 impl Default for Settings {
   fn default() -> Self {
-    Self { language: None, theme: Theme::Dark, check_updates: true, canvas: (2048, 1536), quickshape: true, recent: Vec::new() }
+    Self {
+      language: None,
+      theme: Theme::Dark,
+      check_updates: true,
+      canvas: (2048, 1536),
+      quickshape: true,
+      recent: Vec::new(),
+      pinned: Vec::new(),
+      unit: Unit::Pixels,
+      dpi: 300,
+      background: None,
+      sizes: Vec::new(),
+    }
   }
 }
 
@@ -86,11 +147,26 @@ mod tests {
       canvas: (800, 600),
       quickshape: false,
       recent: vec!["a.rcreate".into()],
+      pinned: vec!["a.rcreate".into()],
+      unit: Unit::Centimeters,
+      dpi: 150,
+      background: None,
+      sizes: vec![SavedSize { name: "Card".into(), width: 1050, height: 600, dpi: 300 }],
     };
     let json = serde_json::to_string(&settings).unwrap();
     assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), settings);
     // An older file without the newer fields still loads.
     let old: Settings = serde_json::from_str(r#"{"theme":"light"}"#).unwrap();
     assert_eq!(old, Settings { theme: Theme::Light, ..Settings::default() });
+  }
+
+  #[test]
+  fn units_convert_through_the_resolution() {
+    // A4 at 300 DPI.
+    assert_eq!(Unit::Millimeters.to_pixels(210.0, 300), 2480);
+    assert_eq!(Unit::Centimeters.to_pixels(29.7, 300), 3508);
+    assert_eq!(Unit::Inches.to_pixels(8.5, 300), 2550);
+    assert_eq!(Unit::Pixels.to_pixels(1920.0, 72), 1920);
+    assert!((Unit::Inches.in_units(600, 300) - 2.0).abs() < 1e-9);
   }
 }

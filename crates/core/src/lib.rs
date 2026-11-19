@@ -234,6 +234,22 @@ impl Document {
     Self::with_history(width, height, History::default())
   }
 
+  /// A canvas whose one layer is filled with `rgb`, like a paper color.
+  pub fn with_background(width: u32, height: u32, rgb: [u8; 3]) -> Self {
+    let mut doc = Self::new(width, height);
+    let (cols, rows) = doc.tiles();
+    let pixel = [rgb[0], rgb[1], rgb[2], 255];
+    let layer = &mut doc.layers[0];
+    for ty in 0..rows {
+      for tx in 0..cols {
+        for p in layer.tile_mut(tx, ty).as_chunks_mut::<4>().0 {
+          *p = pixel;
+        }
+      }
+    }
+    doc
+  }
+
   pub fn with_history(width: u32, height: u32, history: History) -> Self {
     let mut doc = Self {
       width: width.clamp(1, MAX_SIDE),

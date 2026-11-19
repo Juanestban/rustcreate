@@ -48,7 +48,10 @@
 - **Animation step 3 (2026-11-19):** `core::animation_export` writes GIF (`gif` crate), APNG
   (`png`) and PNG sequences frame by frame.
 - **Animation step 4 (2026-11-19):** MP4 export (`Document::export_mp4`). **Phase 4 is done.**
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 5: the home screen.
+- **Home screen (2026-11-19):** `ui::home`, shown at start and after File > Close; previews
+  read from `thumbnail.png` only (`Document::read_thumbnail`).
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 5: tabs (several documents),
+  then 16 bits per channel.
 
 ## Phase 0 — Foundation
 
@@ -211,13 +214,16 @@ time-lapse recording.
 
 ## Phase 5 — Home screen
 
-- [ ] A home screen before the canvas (also what File > Close goes back to)
-- [ ] New canvas from it: width and height in pixels, inches, cm or mm with resolution (DPI),
-      transparent or colored background, 8 or 16 bits per channel
-- [ ] Suggested size templates (screen, square, A4/Letter at 300 DPI, 4K, social posts…) and
-      the user's own saved sizes
-- [ ] Recent projects with a preview thumbnail (saved in the `.rcreate`), opened with one click;
-      pinned and last edited first
+- [x] A home screen before the canvas (also what File > Close goes back to; File > New opens
+      it with a way back)
+- [x] New canvas from it: width and height in pixels, inches, cm or mm with resolution (DPI),
+      transparent or colored background
+- [ ] 16 bits per channel (the whole pixel pipeline is 8-bit RGBA today: tiles, GPU textures,
+      brushes, the file format)
+- [x] Suggested size templates (screen, square, A4/Letter/A5 at 300 DPI, HD, 4K, social posts,
+      video thumbnail, banner) and the user's own saved sizes
+- [x] Recent projects with their saved preview, opened with one click; pinned first, then last
+      opened or saved
 - [ ] Several documents open at once (tabs), which makes File > Save all possible
 
 ## Phase 6 — More platforms

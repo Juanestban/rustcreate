@@ -170,6 +170,25 @@ impl Document {
     Self::read_rcreate(File::open(path)?)
   }
 
+  /// The preview saved in a `.rcreate` file, as straight RGBA: width, height, pixels. Reads
+  /// only that image, so a home screen can show many files quickly.
+  pub fn read_thumbnail(path: &Path) -> Result<(u32, u32, Vec<u8>), FileError> {
+    let mut zip = ZipArchive::new(std::io::BufReader::new(File::open(path)?))?;
+    let mut bytes = Vec::new();
+    // A preview is small: a bigger entry is not one of ours.
+    zip.by_name("thumbnail.png")?.take(8 << 20).read_to_end(&mut bytes)?;
+    let mut decoder = png::Decoder::new(Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16 | png::Transformations::ALPHA);
+    let mut reader = decoder.read_info()?;
+    let (width, height) = (reader.info().width, reader.info().height);
+    if width.max(height) > THUMBNAIL_SIDE * 2 || reader.output_color_type() != (png::ColorType::Rgba, png::BitDepth::Eight) {
+      return Err(invalid(format!("preview {width}×{height}")));
+    }
+    let mut pixels = vec![0; reader.output_buffer_size().ok_or_else(|| invalid("preview size"))?];
+    reader.next_frame(&mut pixels)?;
+    Ok((width, height, pixels))
+  }
+
   fn read_rcreate(reader: impl Read + Seek) -> Result<Self, FileError> {
     let mut zip = ZipArchive::new(reader)?;
     let manifest: Manifest = serde_json::from_reader(zip.by_name("document.json")?)?;
@@ -572,6 +591,18 @@ mod tests {
     reader.next_frame(&mut pixels).unwrap();
     // Half-transparent red over white, then a transparent pixel (unpremultiplied).
     assert_eq!(pixels, [255, 127, 127, 255, 0, 0, 0, 0]);
+    std::fs::remove_dir_all(dir).unwrap();
+  }
+
+  #[test]
+  fn reads_the_preview_back() {
+    let dir = std::env::temp_dir().join(format!("rustcreate-thumb-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("a.rcreate");
+    Document::with_background(300, 150, [10, 200, 30]).save(&path).unwrap();
+    let (w, h, pixels) = Document::read_thumbnail(&path).unwrap();
+    assert_eq!((w, h), (150, 75), "fits 256 px, keeping the aspect");
+    assert_eq!(&pixels[..4], &[10, 200, 30, 255]);
     std::fs::remove_dir_all(dir).unwrap();
   }
 

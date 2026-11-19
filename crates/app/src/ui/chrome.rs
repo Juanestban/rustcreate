@@ -267,7 +267,7 @@ impl App {
     };
     let mut close = true;
     if item(ui, self.i18n.tr("ui-file-new"), "Ctrl+N", true) {
-      self.new_canvas = Some(self.settings.canvas);
+      self.open_home(true);
     } else if item(ui, self.i18n.tr("ui-file-open"), "Ctrl+O", true) {
       self.request(Pending::Open(None));
     } else {
@@ -297,7 +297,7 @@ impl App {
     ui.separator();
     let saved = self.path.is_some();
     if item(ui, self.i18n.tr("ui-file-close"), "Ctrl+W", true) {
-      self.request(Pending::New(self.settings.canvas.0, self.settings.canvas.1));
+      self.request(Pending::Home);
       close = true;
     }
     if item(ui, self.i18n.tr("ui-file-save"), "Ctrl+S", true) {

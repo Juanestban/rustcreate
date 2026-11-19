@@ -91,12 +91,12 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 
 | Shortcut | Action | Status |
 |---|---|---|
-| `Ctrl+N` | New canvas | ✅ |
+| `Ctrl+N` | New canvas (the home screen; Esc goes back) | ✅ |
 | `Ctrl+O` | Open | ✅ |
 | `Ctrl+S` | Save | ✅ |
 | `Ctrl+Shift+S` | Save as | ✅ |
 | `Ctrl+Alt+S` | Save a copy | ✅ |
-| `Ctrl+W` | Close (asks to save first) | ✅ |
+| `Ctrl+W` | Close, back to the home screen (asks to save first) | ✅ |
 | `F12` | Revert to the saved file | ✅ |
 | `Ctrl+Q` | Quit | ✅ |
 | `Ctrl+Alt+Shift+W` | Export PNG ("Export As") | ✅ |

@@ -14,7 +14,6 @@ mod update;
 mod updates;
 
 use canvas::Canvas;
-use eframe::egui::RichText;
 use eframe::{egui, egui_wgpu};
 use i18n::I18n;
 use std::path::PathBuf;
@@ -72,7 +71,10 @@ struct Exporting {
 }
 
 pub(crate) enum Pending {
-  New(u32, u32),
+  /// A canvas of this size, with a paper color or transparent.
+  New(u32, u32, Option<[u8; 3]>),
+  /// File > Close: the home screen, with a blank canvas behind it.
+  Home,
   /// A file, or ask which one.
   Open(Option<PathBuf>),
   /// Back to the file as last saved.
@@ -123,8 +125,8 @@ pub(crate) struct App {
   studio_section: ui::studio::Section,
   preview: Option<ui::studio::Preview>,
   settings: Settings,
-  /// The "New canvas" dialog and the size typed in it.
-  new_canvas: Option<(u32, u32)>,
+  /// The home screen, shown instead of the canvas.
+  pub(crate) home: Option<ui::home::Home>,
   error: Option<String>,
   closing: bool,
   title: String,
@@ -133,15 +135,6 @@ pub(crate) struct App {
   /// The Canvas Size or Image Size dialog.
   resize: Option<ui::resize::ResizeDialog>,
 }
-
-/// Common canvas sizes for the "New canvas" dialog, with their name tokens.
-const PRESETS: [(&str, (u32, u32)); 5] = [
-  ("ui-canvas-screen", (2048, 1536)),
-  ("ui-canvas-hd", (1920, 1080)),
-  ("ui-canvas-4k", (3840, 2160)),
-  ("ui-canvas-square", (2048, 2048)),
-  ("ui-canvas-a4", (2480, 3508)),
-];
 
 impl App {
   fn new(cc: &eframe::CreationContext) -> Self {
@@ -185,8 +178,8 @@ impl App {
       playing: None,
       exporting: None,
       thumbnails_of_frames: Default::default(),
+      home: Some(ui::home::Home::new(&settings, false)),
       settings,
-      new_canvas: None,
       adjusting: None,
       resize: None,
       error: None,
@@ -214,7 +207,15 @@ impl App {
 
   fn perform(&mut self, action: Pending) {
     match action {
-      Pending::New(width, height) => self.replace(Document::new(width, height), None),
+      Pending::New(width, height, background) => {
+        let doc = background.map_or_else(|| Document::new(width, height), |rgb| Document::with_background(width, height, rgb));
+        self.replace(doc, None);
+        self.home = None;
+      }
+      Pending::Home => {
+        self.replace(Document::new(self.settings.canvas.0, self.settings.canvas.1), None);
+        self.open_home(false);
+      }
       Pending::Open(path) => {
         let Some(path) = path.or_else(|| rfd::FileDialog::new().add_filter("rustcreate", &["rcreate"]).pick_file()) else { return };
         self.open(path);
@@ -241,6 +242,7 @@ impl App {
       Ok(doc) => {
         self.remember(&path);
         self.replace(doc, Some(path));
+        self.home = None;
       }
       Err(error) => {
         // A recent file that is gone leaves the list.
@@ -474,7 +476,7 @@ impl App {
 
   /// File and interface shortcuts (docs/SHORTCUTS.md). The longer combinations go first.
   fn shortcuts(&mut self, ctx: &egui::Context) {
-    if ctx.egui_wants_keyboard_input() || self.confirm.is_some() || self.new_canvas.is_some() || self.adjusting.is_some() || self.resize.is_some() {
+    if ctx.egui_wants_keyboard_input() || self.confirm.is_some() || self.home.is_some() || self.adjusting.is_some() || self.resize.is_some() {
       return;
     }
     let (m, shift, alt) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT, egui::Modifiers::ALT);
@@ -483,7 +485,7 @@ impl App {
       self.export(Export::Png);
     }
     if key(m, egui::Key::W) {
-      self.request(Pending::New(self.settings.canvas.0, self.settings.canvas.1));
+      self.request(Pending::Home);
     }
     if key(m, egui::Key::Q) {
       self.request(Pending::Close);
@@ -523,7 +525,7 @@ impl App {
       self.request(Pending::Open(None));
     }
     if key(m, egui::Key::N) {
-      self.new_canvas = Some(self.settings.canvas);
+      self.open_home(true);
     }
     if key(egui::Modifiers::NONE, egui::Key::Tab) {
       self.hidden = !self.hidden;
@@ -531,49 +533,7 @@ impl App {
     }
   }
 
-  fn new_canvas_dialog(&mut self, ctx: &egui::Context) {
-    let Some((mut width, mut height)) = self.new_canvas else { return };
-    let max = self.max_side();
-    let (mut create, mut cancel) = (false, false);
-    egui::Modal::new(egui::Id::unique("new-canvas")).show(ctx, |ui| {
-      ui.set_width(320.0);
-      ui.heading(self.i18n.tr("ui-file-new"));
-      ui.add_space(6.0);
-      for (name, size) in PRESETS {
-        let label = format!("{}  ·  {} × {}", self.i18n.tr(name), size.0, size.1);
-        if ui.selectable_label((width, height) == size, label).clicked() {
-          (width, height) = size;
-        }
-      }
-      ui.add_space(6.0);
-      ui.horizontal(|ui| {
-        ui.label(self.i18n.tr("ui-canvas-width"));
-        ui.add(egui::DragValue::new(&mut width).range(1..=max).suffix(" px"));
-        if ui.button("⇄").on_hover_text(self.i18n.tr("ui-canvas-swap")).clicked() {
-          std::mem::swap(&mut width, &mut height);
-        }
-        ui.label(self.i18n.tr("ui-canvas-height"));
-        ui.add(egui::DragValue::new(&mut height).range(1..=max).suffix(" px"));
-      });
-      ui.label(RichText::new(self.i18n.tr_args("ui-canvas-max", &[("max", max.into())])).small().weak());
-      ui.add_space(10.0);
-      ui.horizontal(|ui| {
-        create = ui.button(self.i18n.tr("ui-canvas-create")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter));
-        cancel = ui.button(self.i18n.tr("ui-cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
-      });
-    });
-    self.new_canvas = Some((width, height));
-    if cancel {
-      self.new_canvas = None;
-    } else if create {
-      self.new_canvas = None;
-      self.apply(Settings { canvas: (width, height), ..self.settings.clone() });
-      self.request(Pending::New(width, height));
-    }
-  }
-
   fn dialogs(&mut self, ctx: &egui::Context) {
-    self.new_canvas_dialog(ctx);
     if self.confirm.is_some() {
       let mut answer = None;
       egui::Modal::new(egui::Id::unique("unsaved")).show(ctx, |ui| {
@@ -644,6 +604,12 @@ impl eframe::App for App {
     }
 
     self.update_banner(ui);
+    if self.home.is_some() {
+      self.home_screen(ui);
+      self.dialogs(&ctx);
+      log::ui_finished();
+      return;
+    }
     self.shortcuts(&ctx);
     if !self.hidden {
       self.top_bar(ui);
