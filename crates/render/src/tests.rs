@@ -153,15 +153,24 @@ fn gpu_groups_match_the_cpu_reference() {
   assert!(doc.layers().iter().filter(|l| l.is_group()).count() == 2);
 
   let mut renderer = CanvasRenderer::new(&device, wgpu::TextureFormat::Bgra8Unorm, (width, height));
-  renderer.sync(&device, &queue, &mut doc);
-  let gpu = read_back(&device, &queue, renderer.composite_texture(), (width, height));
-  let cpu = doc.composite_tile(0, 0).unwrap();
-  for y in 0..height as usize {
-    for x in 0..width as usize {
-      let g = &gpu[(y * width as usize + x) * 4..][..4];
-      let c = &cpu[(y * TILE as usize + x) * 4..][..4];
-      assert!(g.iter().zip(c).all(|(g, c)| g.abs_diff(*c) <= 2), "({x}, {y}): gpu {g:?} cpu {c:?}");
+  let compare = |renderer: &mut CanvasRenderer, doc: &mut Document| {
+    renderer.sync(&device, &queue, doc);
+    let gpu = read_back(&device, &queue, renderer.composite_texture(), (width, height));
+    let cpu = doc.composite_tile(0, 0).unwrap_or_else(|| vec![0; (TILE * TILE * 4) as usize]);
+    for y in 0..height as usize {
+      for x in 0..width as usize {
+        let g = &gpu[(y * width as usize + x) * 4..][..4];
+        let c = &cpu[(y * TILE as usize + x) * 4..][..4];
+        assert!(g.iter().zip(c).all(|(g, c)| g.abs_diff(*c) <= 2), "({x}, {y}): gpu {g:?} cpu {c:?}");
+      }
     }
+  };
+  compare(&mut renderer, &mut doc);
+  // Animation Assist: each top-level layer or group is a frame and only one shows.
+  doc.animation.enabled = true;
+  for frame in doc.frames() {
+    doc.set_playing(Some(frame));
+    compare(&mut renderer, &mut doc);
   }
 }
 

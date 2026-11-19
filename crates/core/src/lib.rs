@@ -1,6 +1,7 @@
 //! The document model: a canvas of tiled RGBA8 raster layers with undo (ADR 0005). No GPU here.
 
 mod adjust;
+mod animation;
 pub mod blend;
 mod brush;
 mod file;
@@ -21,6 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub use adjust::{Adjust, Adjustment, curve};
+pub use animation::{Animation, Playback};
 pub use brush::{Brush, Stroke};
 pub use file::{FORMAT, FileError};
 pub use fill::{Gradient, GradientKind};
@@ -211,6 +213,11 @@ pub struct Document {
   /// The app's drawing guide for this canvas, saved in the file as is. Core does not read it;
   /// changing it is not an undoable edit.
   pub guide: Option<serde_json::Value>,
+  /// Animation Assist: frames, speed and playback, saved in the file; changing it is not an
+  /// undoable edit (like the guide).
+  pub animation: Animation,
+  /// The frame shown while playing (a layer index), instead of the active layer's frame.
+  pub(crate) playing: Option<usize>,
   /// What painting is limited to; `None` = the whole canvas. Not saved in the file.
   selection: Option<Selection>,
   /// Brush, fill and gradient go to the active layer's mask instead of its pixels.
@@ -233,6 +240,8 @@ impl Document {
       history,
       revision: 0,
       guide: None,
+      animation: Animation::default(),
+      playing: None,
       selection: None,
       editing_mask: false,
     };

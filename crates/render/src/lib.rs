@@ -193,10 +193,16 @@ impl CanvasRenderer {
     let live: Vec<u64> = doc.layers().iter().flat_map(|l| [Some(l.id), l.mask.as_ref().map(|m| m.id)]).flatten().collect();
     self.layers.retain(|id, _| live.contains(id));
 
-    let composed: Vec<_> =
-      doc.layers().iter().map(|l| (l.id, l.opacity.to_bits(), l.hidden, l.blend, l.clip, l.mask.as_ref().map(|m| m.id), l.parent())).collect();
+    // Hidden as the document says: Animation Assist leaves out every frame but the one shown.
+    let hidden: Vec<bool> = (0..doc.layers().len()).map(|i| doc.hides(i)).collect();
+    let composed: Vec<_> = doc
+      .layers()
+      .iter()
+      .zip(&hidden)
+      .map(|(l, &hidden)| (l.id, l.opacity.to_bits(), hidden, l.blend, l.clip, l.mask.as_ref().map(|m| m.id), l.parent()))
+      .collect();
     if changed || composed != self.composed || std::mem::take(&mut self.float_moved) {
-      self.composite(device, queue, doc.layers());
+      self.composite(device, queue, doc.layers(), &hidden);
       self.composed = composed;
     }
   }
@@ -265,9 +271,9 @@ impl CanvasRenderer {
     }
   }
 
-  fn composite(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, layers: &[Layer]) {
+  fn composite(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, layers: &[Layer], hidden: &[bool]) {
     let mut steps = Vec::new();
-    plan(layers, None, 0..layers.len(), 0, &mut steps);
+    plan(layers, hidden, None, 0..layers.len(), 0, &mut steps);
     // Targets for every depth the plan reaches.
     let depths = steps.iter().map(|s| if let Step::Clear(d) = s { *d + 1 } else { 0 }).max().unwrap_or(1);
     while self.stacks.len() < depths {
@@ -419,7 +425,7 @@ enum Step {
 /// The passes for the layers in `range` whose group is `parent`, like
 /// `Document::composite_tile` on the CPU: a group's children are composited one depth deeper
 /// first, then the result is drawn like a layer.
-fn plan(layers: &[Layer], parent: Option<u64>, range: std::ops::Range<usize>, depth: usize, steps: &mut Vec<Step>) {
+fn plan(layers: &[Layer], hidden: &[bool], parent: Option<u64>, range: std::ops::Range<usize>, depth: usize, steps: &mut Vec<Step>) {
   steps.push(Step::Clear(depth));
   let mut base: Option<Source> = None;
   let mut first = true;
@@ -431,11 +437,11 @@ fn plan(layers: &[Layer], parent: Option<u64>, range: std::ops::Range<usize>, de
     let clipped = layer.clip && !first;
     first = false;
     let source = if layer.is_group() { Source::Group(depth + 1) } else { Source::Layer(layer.id) };
-    if layer.is_group() && !layer.hidden {
-      plan(layers, Some(layer.id), rustcreate_core::group_span(layers, i), depth + 1, steps);
+    if layer.is_group() && !hidden[i] {
+      plan(layers, hidden, Some(layer.id), rustcreate_core::group_span(layers, i), depth + 1, steps);
     }
     if !clipped {
-      base = (!layer.hidden).then(|| {
+      base = (!hidden[i]).then(|| {
         if layer.is_group() {
           steps.push(Step::KeepBase(depth));
           Source::Base(depth)
@@ -444,7 +450,7 @@ fn plan(layers: &[Layer], parent: Option<u64>, range: std::ops::Range<usize>, de
         }
       });
     }
-    let Some(base) = base.filter(|_| !layer.hidden) else { continue };
+    let Some(base) = base.filter(|_| !hidden[i]) else { continue };
     steps.push(Step::Draw { depth, index: i, source, base, clipped });
   }
 }

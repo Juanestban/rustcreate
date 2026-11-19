@@ -31,6 +31,8 @@ pub enum Icon {
   Duplicate,
   MergeDown,
   Text,
+  Play,
+  Pause,
 }
 
 fn arc(center: Pos2, radius: f32, a0: f32, a1: f32) -> Vec<Pos2> {
@@ -164,6 +166,13 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
       seg((12.0, 3.0), (12.0, 14.0));
       line(vec![at(7.5, 9.5), at(12.0, 14.0), at(16.5, 9.5)]);
       seg((4.0, 19.5), (20.0, 19.5));
+    }
+    Icon::Play => {
+      line(vec![at(8.0, 5.0), at(19.0, 12.0), at(8.0, 19.0), at(8.0, 5.0)]);
+    }
+    Icon::Pause => {
+      seg((8.5, 5.5), (8.5, 18.5));
+      seg((15.5, 5.5), (15.5, 18.5));
     }
     Icon::Text => {
       // A capital T with turned-down ends and a foot.

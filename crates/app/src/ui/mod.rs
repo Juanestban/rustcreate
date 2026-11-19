@@ -7,3 +7,4 @@ pub mod icons;
 pub mod resize;
 pub mod studio;
 pub mod theme;
+pub mod timeline;

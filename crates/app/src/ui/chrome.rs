@@ -353,6 +353,17 @@ impl App {
       self.open_resize(true);
     }
     ui.separator();
+    // Animation Assist (Procreate): every top-level layer or group becomes a frame.
+    let mut animation = self.doc.animation.enabled;
+    if ui
+      .checkbox(&mut animation, RichText::new(self.i18n.tr("ui-animation-assist")).strong())
+      .on_hover_text(self.i18n.tr("ui-animation-help"))
+      .changed()
+    {
+      self.doc.animation.enabled = animation;
+      self.stop_playback();
+    }
+    ui.separator();
     self.guides_section(ui);
     ui.separator();
     // Settings: applied and saved as soon as they change.

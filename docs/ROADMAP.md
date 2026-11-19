@@ -41,7 +41,10 @@
 - **File menu (2026-11-19):** the top left button opens Photoshop's File menu (recent files are
   kept in the settings); PSD and `Brush.archive` moved to "Technical debt" for after v1.0.
   **Phase 3 is done.**
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 4 (animation) next.
+- **Animation step 1 (2026-11-19):** Animation Assist in Actions; frames are top-level layers
+  and groups (ADR 0007); a timeline under the canvas with thumbnails and playback.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 4 step 2: onion skin, hold
+  frames, background/foreground frames.
 
 ## Phase 0 — Foundation
 
@@ -190,9 +193,11 @@ time-lapse recording.
 
 ## Phase 4 — Animation
 
-- [ ] Animation Assist: timeline of frames (one layer or group per frame)
+- [x] Animation Assist: timeline of frames (one top-level layer or group per frame) with
+      thumbnails, add/duplicate/delete frames, only the shown frame on the canvas
+      ([ADR 0007](adr/0007-animation-frames-are-layers.md))
 - [ ] Onion skin (frames, opacity, colors), hold frames, background/foreground frames
-- [ ] Playback: loop, ping-pong, one-shot; frames per second
+- [x] Playback: loop, ping-pong, one-shot; 1–60 frames per second; a press on the canvas stops it
 - [ ] Export GIF, MP4, animated PNG, PNG sequence
 
 ## Phase 5 — Home screen

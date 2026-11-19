@@ -86,6 +86,9 @@ pub(crate) struct App {
   renaming: Option<(u64, String)>,
   /// A layer opacity drag in progress (one undo step per drag).
   editing_slider: bool,
+  /// Animation playback: when it started (egui time) and the timeline's frame thumbnails.
+  pub(crate) playing: Option<f64>,
+  pub(crate) thumbnails_of_frames: ui::timeline::Thumbnails,
   /// Tab hides the interface.
   hidden: bool,
   confirm: Option<Pending>,
@@ -165,6 +168,8 @@ impl App {
       thumbnails: Default::default(),
       studio_section: Default::default(),
       preview: None,
+      playing: None,
+      thumbnails_of_frames: Default::default(),
       settings,
       new_canvas: None,
       adjusting: None,
@@ -564,6 +569,7 @@ impl eframe::App for App {
       self.top_bar(ui);
       self.sidebar(ui);
     }
+    self.timeline(ui);
     // Esc closes an open panel before anything else (a transform, a selection) sees it.
     if self.popover.is_some() && !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
       self.popover = None;

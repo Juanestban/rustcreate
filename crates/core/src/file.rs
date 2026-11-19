@@ -54,6 +54,9 @@ struct Manifest {
   /// The drawing guide (`Document::guide`); older files have none.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   guide: Option<serde_json::Value>,
+  /// Animation Assist settings; older files have none (off).
+  #[serde(default)]
+  animation: crate::Animation,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -125,6 +128,7 @@ impl Document {
         })
         .collect(),
       guide: self.guide.clone(),
+      animation: self.animation,
     };
     zip.start_file("document.json", stored)?;
     serde_json::to_writer_pretty(&mut zip, &manifest)?;
@@ -169,6 +173,7 @@ impl Document {
 
     let mut doc = Document::with_history(manifest.width, manifest.height, History::default());
     doc.guide = manifest.guide;
+    doc.animation = manifest.animation.sanitized();
     doc.layers.clear();
     for info in manifest.layers {
       if doc.layers.iter().any(|l| l.id == info.id) {
@@ -280,12 +285,18 @@ impl Document {
   /// The visible layers of one tile blended together (premultiplied), or `None` if no visible
   /// layer painted it.
   pub fn composite_tile(&self, tx: u32, ty: u32) -> Option<Vec<u8>> {
-    self.composite_level(None, 0..self.layers.len(), tx, ty)
+    self.composite_level(None, 0..self.layers.len(), tx, ty, None)
+  }
+
+  /// One animation frame alone (the top-level layer or group at `index`), as on screen when it
+  /// is the frame shown.
+  pub fn frame_tile(&self, index: usize, tx: u32, ty: u32) -> Option<Vec<u8>> {
+    self.composite_level(None, 0..self.layers.len(), tx, ty, Some(index))
   }
 
   /// The layers in `range` whose group is `parent`, blended together; a group in there is
   /// composited on its own first (the GPU does the same in `render`).
-  fn composite_level(&self, parent: Option<u64>, range: std::ops::Range<usize>, tx: u32, ty: u32) -> Option<Vec<u8>> {
+  fn composite_level(&self, parent: Option<u64>, range: std::ops::Range<usize>, tx: u32, ty: u32, frame: Option<usize>) -> Option<Vec<u8>> {
     let mut out: Option<Vec<u8>> = None;
     // The base of a clipping group: its pixels, and whether it shows at all.
     // shortcut: clipping follows the base's paint, not its mask (the GPU does the same); pass
@@ -299,15 +310,16 @@ impl Document {
       }
       let clipped = layer.clip && !first;
       first = false;
+      let hidden = self.hidden_in(i, frame);
       let pixels: Option<Cow<[u8]>> = if layer.group {
-        if layer.hidden { None } else { self.composite_level(Some(layer.id), crate::group_span(&self.layers, i), tx, ty).map(Cow::Owned) }
+        if hidden { None } else { self.composite_level(Some(layer.id), crate::group_span(&self.layers, i), tx, ty, frame).map(Cow::Owned) }
       } else {
         layer.tile(tx, ty).map(Cow::Borrowed)
       };
       if !clipped {
-        base = (pixels.clone(), !layer.hidden);
+        base = (pixels.clone(), !hidden);
       }
-      if layer.hidden || (clipped && !base.1) {
+      if hidden || (clipped && !base.1) {
         continue;
       }
       let Some(pixels) = pixels else { continue };
