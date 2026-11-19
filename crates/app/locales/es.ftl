@@ -372,3 +372,4 @@ ui-unit-in = Pulgadas
 ui-unit-cm = Centímetros
 ui-unit-mm = Milímetros
 ui-home-swap = Intercambiar
+ui-file-save-all = Guardar todo

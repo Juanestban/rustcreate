@@ -108,10 +108,54 @@ impl App {
                 self.canvas.tools.tool = tool;
               }
             }
+            // The open documents, in the space between the two groups of tools.
+            if self.tabs.len() > 1 {
+              ui.add_space(12.0);
+              ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                ui.add_space(12.0);
+                self.tab_strip(ui);
+              });
+            }
           });
         });
       },
     );
+  }
+
+  fn tab_strip(&mut self, ui: &mut egui::Ui) {
+    let palette = theme::palette(ui);
+    let mut action = None;
+    egui::ScrollArea::horizontal().auto_shrink([false, true]).show(ui, |ui| {
+      ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (index, (name, dirty)) in self.tab_names().into_iter().enumerate() {
+          let shown = index == self.tab;
+          let fill = if shown { palette.control } else { Color32::TRANSPARENT };
+          Frame::NONE.fill(fill).corner_radius(8).inner_margin(Margin { left: 10, right: 4, top: 3, bottom: 3 }).show(ui, |ui| {
+            ui.horizontal(|ui| {
+              ui.spacing_mut().item_spacing.x = 4.0;
+              let text = if dirty { format!("{name} •") } else { name };
+              let color = if shown { palette.ink } else { palette.muted };
+              let label = ui.add(egui::Label::new(RichText::new(text).color(color)).truncate().sense(Sense::click()));
+              if label.clicked() {
+                action = Some((index, false));
+              }
+              let close =
+                ui.add(egui::Button::new(RichText::new("×").color(palette.muted)).frame(false)).on_hover_text(self.i18n.tr("ui-file-close"));
+              if close.clicked() {
+                action = Some((index, true));
+              }
+            });
+          });
+        }
+      });
+    });
+    if let Some((index, close)) = action {
+      self.switch_tab(index);
+      if close {
+        self.request(Pending::Home);
+      }
+    }
   }
 
   fn toggle(&mut self, popover: Popover) {
@@ -306,6 +350,10 @@ impl App {
     }
     if item(ui, self.i18n.tr("ui-file-save-as"), "Ctrl+Shift+S", true) {
       self.save(true);
+      close = true;
+    }
+    if item(ui, self.i18n.tr("ui-file-save-all"), "", self.tabs.len() > 1) {
+      self.save_all();
       close = true;
     }
     if item(ui, self.i18n.tr("ui-file-save-copy"), "Ctrl+Alt+S", true) {

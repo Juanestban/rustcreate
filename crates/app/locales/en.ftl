@@ -372,3 +372,4 @@ ui-unit-in = Inches
 ui-unit-cm = Centimeters
 ui-unit-mm = Millimeters
 ui-home-swap = Swap
+ui-file-save-all = Save all

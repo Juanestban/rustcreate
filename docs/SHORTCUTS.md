@@ -97,6 +97,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Ctrl+Shift+S` | Save as | ✅ |
 | `Ctrl+Alt+S` | Save a copy | ✅ |
 | `Ctrl+W` | Close, back to the home screen (asks to save first) | ✅ |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous document tab | ✅ |
 | `F12` | Revert to the saved file | ✅ |
 | `Ctrl+Q` | Quit | ✅ |
 | `Ctrl+Alt+Shift+W` | Export PNG ("Export As") | ✅ |

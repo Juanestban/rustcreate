@@ -284,6 +284,15 @@ impl Canvas {
   }
 
   /// A new or opened document: a renderer of its size, the view fitted again. Tools stay.
+  /// Where the canvas sits on screen, kept per document tab.
+  pub fn view(&self) -> Option<View> {
+    self.view
+  }
+
+  pub fn set_view(&mut self, view: Option<View>) {
+    self.view = view;
+  }
+
   pub fn reset(&mut self, render_state: &egui_wgpu::RenderState, doc: &Document) {
     let tools = std::mem::take(&mut self.tools);
     *self = Self { tools, ..Self::new(render_state, doc) };

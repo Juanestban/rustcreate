@@ -50,8 +50,9 @@
 - **Animation step 4 (2026-11-19):** MP4 export (`Document::export_mp4`). **Phase 4 is done.**
 - **Home screen (2026-11-19):** `ui::home`, shown at start and after File > Close; previews
   read from `thumbnail.png` only (`Document::read_thumbnail`).
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 5: tabs (several documents),
-  then 16 bits per channel.
+- **Tabs (2026-11-19):** `tabs.rs`; the shown document stays in `App`'s fields, the others
+  wait in `App::tabs`. 16 bits per channel moved to "Technical debt". **Phase 5 is done.**
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 6: more platforms.
 
 ## Phase 0 — Foundation
 
@@ -195,8 +196,7 @@ The Photoshop features people use most, in this order:
 - PSD import/export: deferred to after v1.0 (see "Technical debt")
 
 Later: adjustment layers, warp/distort and liquify, motion blur and chromatic aberration,
-16-bit channels and color management (Display P3, ICC), TIFF export, reference window,
-time-lapse recording.
+color management (Display P3, ICC), TIFF export, reference window, time-lapse recording.
 
 ## Phase 4 — Animation
 
@@ -218,13 +218,13 @@ time-lapse recording.
       it with a way back)
 - [x] New canvas from it: width and height in pixels, inches, cm or mm with resolution (DPI),
       transparent or colored background
-- [ ] 16 bits per channel (the whole pixel pipeline is 8-bit RGBA today: tiles, GPU textures,
-      brushes, the file format)
 - [x] Suggested size templates (screen, square, A4/Letter/A5 at 300 DPI, HD, 4K, social posts,
       video thumbnail, banner) and the user's own saved sizes
 - [x] Recent projects with their saved preview, opened with one click; pinned first, then last
       opened or saved
-- [ ] Several documents open at once (tabs), which makes File > Save all possible
+- [x] Several documents open at once (tabs in the top bar; New and Open add a tab, an untouched
+      untitled canvas is replaced; each tab keeps its view), File > Save all, Ctrl+Tab, quitting
+      asks about every unsaved tab
 
 ## Phase 6 — More platforms
 
@@ -239,3 +239,5 @@ time-lapse recording.
 - [ ] PSD import and export (layers, groups, masks, blend modes, text as pixels)
 - [ ] Reading the rest of imported brush settings: Procreate `Brush.archive` (a binary plist)
       and ABR descriptors, mapped onto our brush settings
+- [ ] 16 bits per channel, as a new canvas option: the whole pixel pipeline is 8-bit RGBA today
+      (tiles, GPU textures, brushes, the file format)

@@ -8,6 +8,7 @@ mod log;
 mod palettes;
 mod pen;
 mod settings;
+mod tabs;
 mod tools;
 mod ui;
 mod update;
@@ -95,6 +96,10 @@ pub(crate) struct App {
   path: Option<PathBuf>,
   /// `doc.revision()` at the last save: anything else is unsaved.
   saved: u64,
+  /// Every open document in tab order; the shown one's slot is empty (its document is `doc`).
+  tabs: Vec<Option<tabs::Tab>>,
+  /// The shown tab.
+  tab: usize,
   popover: Option<Popover>,
   /// The layer being renamed and the text typed so far.
   renaming: Option<(u64, String)>,
@@ -156,6 +161,8 @@ impl App {
       updates: Updates::start(cc.egui_ctx.clone(), settings.check_updates),
       render_state,
       saved: doc.revision(),
+      tabs: vec![None],
+      tab: 0,
       doc,
       canvas,
       path: None,
@@ -202,30 +209,42 @@ impl App {
     self.adjusting = None;
     // A transform in progress is applied first, so it is saved or asked about like any edit.
     self.canvas.end_transform(&mut self.doc, true);
-    if self.dirty() { self.confirm = Some(action) } else { self.perform(action) }
+    // New and Open go to a new tab: nothing to save first.
+    let asks = self.dirty() && !matches!(action, Pending::New(..) | Pending::Open(_));
+    if asks { self.confirm = Some(action) } else { self.perform(action) }
   }
 
   fn perform(&mut self, action: Pending) {
     match action {
       Pending::New(width, height, background) => {
         let doc = background.map_or_else(|| Document::new(width, height), |rgb| Document::with_background(width, height, rgb));
-        self.replace(doc, None);
+        self.open_tab(doc, None);
         self.home = None;
       }
-      Pending::Home => {
-        self.replace(Document::new(self.settings.canvas.0, self.settings.canvas.1), None);
-        self.open_home(false);
-      }
+      Pending::Home => self.close_tab(),
       Pending::Open(path) => {
         let Some(path) = path.or_else(|| rfd::FileDialog::new().add_filter("rustcreate", &["rcreate"]).pick_file()) else { return };
-        self.open(path);
+        match self.tab_of(&path) {
+          Some(index) => {
+            self.switch_tab(index);
+            self.home = None;
+          }
+          None => self.open(path, true),
+        }
       }
       Pending::Revert => {
         if let Some(path) = self.path.clone() {
-          self.open(path);
+          self.open(path, false);
         }
       }
       Pending::Close => {
+        // Saved or discarded: on to the next tab with unsaved changes, if any.
+        self.saved = self.doc.revision();
+        if let Some(index) = self.dirty_tab() {
+          self.switch_tab(index);
+          self.confirm = Some(Pending::Close);
+          return;
+        }
         self.closing = true;
         self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
       }
@@ -233,7 +252,8 @@ impl App {
     }
   }
 
-  fn open(&mut self, path: PathBuf) {
+  /// Opens `path` in a new tab, or in place of the shown document (Revert).
+  fn open(&mut self, path: PathBuf, new_tab: bool) {
     match Document::open(&path) {
       Ok(doc) if doc.width.max(doc.height) > self.max_side() => {
         let error = format!("{} × {} > {}", doc.width, doc.height, self.max_side());
@@ -241,7 +261,11 @@ impl App {
       }
       Ok(doc) => {
         self.remember(&path);
-        self.replace(doc, Some(path));
+        if new_tab {
+          self.open_tab(doc, Some(path))
+        } else {
+          self.replace(doc, Some(path))
+        }
         self.home = None;
       }
       Err(error) => {
@@ -527,6 +551,13 @@ impl App {
     if key(m, egui::Key::N) {
       self.open_home(true);
     }
+    // Ctrl+Tab and Ctrl+Shift+Tab: the next and previous tab, before Tab hides the interface.
+    if self.tabs.len() > 1 && key(m | shift, egui::Key::Tab) {
+      self.switch_tab((self.tab + self.tabs.len() - 1) % self.tabs.len());
+    }
+    if self.tabs.len() > 1 && key(m, egui::Key::Tab) {
+      self.switch_tab((self.tab + 1) % self.tabs.len());
+    }
     if key(egui::Modifiers::NONE, egui::Key::Tab) {
       self.hidden = !self.hidden;
       self.popover = None;
@@ -593,9 +624,11 @@ impl eframe::App for App {
       ctx.request_repaint();
     }
     // Closing the window with unsaved changes asks first.
-    if ctx.input(|i| i.viewport().close_requested()) && !self.closing && self.dirty() {
+    if ctx.input(|i| i.viewport().close_requested()) && !self.closing && (self.dirty() || self.dirty_tab().is_some()) {
       ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-      self.confirm = Some(Pending::Close);
+      if self.confirm.is_none() {
+        self.request(Pending::Close);
+      }
     }
     let title = format!("{}{} — rustcreate", self.name(), if self.dirty() { " •" } else { "" });
     if title != self.title {
