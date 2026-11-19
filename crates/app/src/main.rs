@@ -60,6 +60,7 @@ pub(crate) enum Export {
   Gif,
   AnimatedPng,
   PngSequence,
+  Mp4,
 }
 
 /// An animation export running on its own thread: frames written so far, out of `total`, and
@@ -348,6 +349,7 @@ impl App {
     let target = match format {
       Export::Gif => rfd::FileDialog::new().add_filter("GIF", &["gif"]).set_file_name(format!("{name}.gif")).save_file(),
       Export::AnimatedPng => rfd::FileDialog::new().add_filter("APNG", &["png", "apng"]).set_file_name(format!("{name}.png")).save_file(),
+      Export::Mp4 => rfd::FileDialog::new().add_filter("MP4", &["mp4"]).set_file_name(format!("{name}.mp4")).save_file(),
       _ => rfd::FileDialog::new().pick_folder(),
     };
     let Some(target) = target else { return };
@@ -363,6 +365,7 @@ impl App {
       let result = match format {
         Export::Gif => std::fs::File::create(&target).map_err(Into::into).and_then(|file| doc.export_gif(file, &progress)),
         Export::AnimatedPng => std::fs::File::create(&target).map_err(Into::into).and_then(|file| doc.export_apng(file, &progress)),
+        Export::Mp4 => std::fs::File::create(&target).map_err(Into::into).and_then(|file| doc.export_mp4(std::io::BufWriter::new(file), &progress)),
         _ => doc.export_png_sequence(&target, &name, &progress).map(|_| ()),
       };
       if let Ok(mut slot) = thread_outcome.lock() {
@@ -430,7 +433,7 @@ impl App {
           image::ImageEncoder::write_image(encoder, &rgb, width, height, image::ExtendedColorType::Rgb8).map_err(|e| e.to_string())
         })
       }
-      Export::Gif | Export::AnimatedPng | Export::PngSequence => unreachable!("exported above"),
+      Export::Gif | Export::AnimatedPng | Export::PngSequence | Export::Mp4 => unreachable!("exported above"),
       Export::Webp => std::fs::File::create(&path).map_err(|e| e.to_string()).and_then(|file| {
         let encoder = image::codecs::webp::WebPEncoder::new_lossless(std::io::BufWriter::new(file));
         image::ImageEncoder::write_image(encoder, &self.doc.flatten(), width, height, image::ExtendedColorType::Rgba8).map_err(|e| e.to_string())

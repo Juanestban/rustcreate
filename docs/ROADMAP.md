@@ -47,7 +47,8 @@
   hold duration (`Layer.hold`), background/foreground frames that never play on their own.
 - **Animation step 3 (2026-11-19):** `core::animation_export` writes GIF (`gif` crate), APNG
   (`png`) and PNG sequences frame by frame.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 4 step 4: MP4 export.
+- **Animation step 4 (2026-11-19):** MP4 export (`Document::export_mp4`). **Phase 4 is done.**
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 5: the home screen.
 
 ## Phase 0 — Foundation
 
@@ -205,7 +206,8 @@ time-lapse recording.
 - [x] Export animated GIF, animated PNG and a PNG sequence (File menu, on a background
       thread with progress; holds, ping-pong and one shot respected; background/foreground
       frames included, onion skin never)
-- [ ] Export MP4 (H.264 with OpenH264)
+- [x] Export MP4: H.264 from OpenH264 built from source, on white, each frame held for its
+      duration (`mp4` crate for the container)
 
 ## Phase 5 — Home screen
 

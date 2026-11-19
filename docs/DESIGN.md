@@ -50,7 +50,7 @@ file; do not silently diverge.
 
 - Native format `.rcreate`: zip with `document.json`, a PNG per layer and a thumbnail
   ([ADR 0003](adr/0003-rcreate-file-format.md)).
-- Export PNG in v0.1; JPEG and WebP from the File menu; GIF/MP4 with animation (Phase 4); PSD after v1.0 (technical debt).
+- Export PNG in v0.1; JPEG and WebP from the File menu; GIF, APNG, PNG sequence and MP4 with animation (Phase 4, ADR 0007); PSD after v1.0 (technical debt).
 - Animation follows Procreate's Animation Assist: every top-level layer or group is a frame
   ([ADR 0007](adr/0007-animation-frames-are-layers.md)).
 

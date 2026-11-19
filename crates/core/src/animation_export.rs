@@ -91,6 +91,88 @@ impl Document {
   }
 }
 
+impl Document {
+  /// An H.264 MP4 on white (video has no transparency), each frame encoded once and held for
+  /// its duration. The picture grows with white to an even size of at least 16 px, as H.264
+  /// needs.
+  pub fn export_mp4(&self, out: impl Write + std::io::Seek, done: &dyn Fn(usize)) -> Result<(), FileError> {
+    use openh264::encoder::{BitRate, Encoder, EncoderConfig, FrameRate, FrameType};
+    use openh264::formats::{RgbSliceU8, YUVBuffer};
+    let video = |e: openh264::Error| FileError::Video(e.to_string());
+    let (width, height) = (self.width as usize, self.height as usize);
+    let (w, h) = (((width + 1) & !1).max(16), ((height + 1) & !1).max(16));
+    let fps = self.animation.fps.clamp(1, 60);
+    let config = EncoderConfig::new()
+      .max_frame_rate(FrameRate::from_hz(fps as f32))
+      // About 0.3 bits per pixel per frame: crisp lines without huge files.
+      .bitrate(BitRate::from_bps(((w * h) as f64 * fps as f64 * 0.3).clamp(500_000.0, 50_000_000.0) as u32))
+      .skip_frames(false);
+    let mut encoder = Encoder::with_api_config(openh264::OpenH264API::from_source(), config).map_err(video)?;
+    let mut mp4: Option<mp4::Mp4Writer<_>> = None;
+    let mut out = Some(out);
+    let mut time = 0u64;
+    let mut rgb = vec![255u8; w * h * 3];
+    for (n, (index, steps)) in self.export_frames().into_iter().enumerate() {
+      let rgba = self.frame_rgba(index);
+      for y in 0..height {
+        for x in 0..width {
+          let (s, d) = ((y * width + x) * 4, (y * w + x) * 3);
+          let a = rgba[s + 3] as u32;
+          for c in 0..3 {
+            rgb[d + c] = ((rgba[s + c] as u32 * a + 255 * (255 - a) + 127) / 255) as u8;
+          }
+        }
+      }
+      let stream = encoder.encode(&YUVBuffer::from_rgb_source(RgbSliceU8::new(&rgb, (w, h)))).map_err(video)?;
+      // Annex B NAL units to MP4's length-prefixed ones; parameter sets go in the track header.
+      let (mut sample, mut sps, mut pps) = (Vec::new(), None, None);
+      for layer in (0..stream.num_layers()).filter_map(|i| stream.layer(i)) {
+        for nal in (0..layer.nal_count()).filter_map(|i| layer.nal_unit(i)) {
+          let start = nal.iter().position(|&b| b != 0).map_or(nal.len(), |i| i + 1);
+          let nal = &nal[start.min(nal.len())..];
+          match nal.first().map(|b| b & 0x1f) {
+            None => {}
+            Some(7) => sps = Some(nal.to_vec()),
+            Some(8) => pps = Some(nal.to_vec()),
+            Some(_) => {
+              sample.extend_from_slice(&(nal.len() as u32).to_be_bytes());
+              sample.extend_from_slice(nal);
+            }
+          }
+        }
+      }
+      let is_sync = matches!(stream.frame_type(), FrameType::IDR | FrameType::I);
+      if mp4.is_none() {
+        let (Some(sps), Some(pps)) = (sps, pps) else { return Err(FileError::Video("no parameter sets".into())) };
+        let config = mp4::Mp4Config {
+          major_brand: str::parse("isom").expect("brand"),
+          minor_version: 512,
+          compatible_brands: ["isom", "iso2", "avc1", "mp41"].iter().map(|b| str::parse(b).expect("brand")).collect(),
+          timescale: fps,
+        };
+        let mut writer = mp4::Mp4Writer::write_start(out.take().expect("once"), &config).map_err(|e| FileError::Video(e.to_string()))?;
+        let avc = mp4::AvcConfig { width: w as u16, height: h as u16, seq_param_set: sps, pic_param_set: pps };
+        let track = mp4::TrackConfig {
+          track_type: mp4::TrackType::Video,
+          timescale: fps,
+          language: "und".into(),
+          media_conf: mp4::MediaConfig::AvcConfig(avc),
+        };
+        writer.add_track(&track).map_err(|e| FileError::Video(e.to_string()))?;
+        mp4 = Some(writer);
+      }
+      let sample = mp4::Mp4Sample { start_time: time, duration: steps, rendering_offset: 0, is_sync, bytes: bytes::Bytes::from(sample) };
+      mp4.as_mut().expect("started").write_sample(1, &sample).map_err(|e| FileError::Video(e.to_string()))?;
+      time += steps as u64;
+      done(n + 1);
+    }
+    if let Some(mut writer) = mp4 {
+      writer.write_end().map_err(|e| FileError::Video(e.to_string()))?;
+    }
+    Ok(())
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -147,5 +229,21 @@ mod tests {
     assert_eq!(paths.len(), 4, "the held frame is written twice");
     assert!(paths[3].ends_with("walk_0004.png"));
     std::fs::remove_dir_all(&dir).ok();
+  }
+
+  #[test]
+  fn mp4_holds_every_frame_for_its_duration() {
+    let mut doc = animation();
+    // Odd sizes grow to even ones, tiny ones to 16 px.
+    doc.resize_canvas(33, 7, (0.0, 0.0));
+    let mut out = std::io::Cursor::new(Vec::new());
+    doc.export_mp4(&mut out, &|_| {}).unwrap();
+    let bytes = out.into_inner();
+    let size = bytes.len() as u64;
+    let mut reader = mp4::Mp4Reader::read_header(std::io::Cursor::new(&bytes), size).unwrap();
+    let track = reader.tracks().values().next().unwrap();
+    assert_eq!((track.width(), track.height(), track.sample_count()), (34, 16, 3));
+    let durations: Vec<u32> = (1..=3).map(|i| reader.read_sample(1, i).unwrap().unwrap().duration).collect();
+    assert_eq!(durations, vec![1, 2, 1]);
   }
 }

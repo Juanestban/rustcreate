@@ -19,10 +19,19 @@ so far (layers, groups, masks, the `.rcreate` format).
 - The settings (`enabled`, `fps` 1–60, `playback`: loop, ping-pong or one shot) are saved in
   `document.json` as an optional `animation` field, so the format version stays 1. Changing them
   is not an undo step (like the guide).
-- Export works frame by frame from `Document::frame_tile`: GIF, animated PNG and PNG sequences
-  first; MP4 later with OpenH264.
+- Export works frame by frame from `Document::frame_tile`: GIF, animated PNG, PNG sequences and
+  MP4. MP4 is H.264 from OpenH264 compiled from source (the `openh264` crate, BSD-2-Clause) in an
+  `mp4` container, on white, padded to an even size of at least 16 px; a held frame is one
+  sample with a longer duration.
 
 ## Consequences
+
+- H.264 is patented. Cisco pays the royalties only for its own prebuilt OpenH264 binaries;
+  an OpenH264 compiled into the app is not covered. Fine for a free open-source app for now;
+  before a commercial release, load Cisco's binary at run time (the crate's `libloading`
+  feature) instead.
+- `openh264-sys2` compiles C++ in its build script: the Windows CI (MSVC) builds it, but a
+  Windows clippy check from macOS needs a stand-in C/C++ compiler.
 
 - No new document structure: painting, undo, files and the layers panel work on frames as they
   are.

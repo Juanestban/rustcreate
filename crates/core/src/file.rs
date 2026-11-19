@@ -39,6 +39,8 @@ pub enum FileError {
   Invalid(String),
   #[error("could not write the GIF: {0}")]
   Gif(#[from] gif::EncodingError),
+  #[error("could not write the video: {0}")]
+  Video(String),
 }
 
 fn invalid(why: impl Into<String>) -> FileError {
