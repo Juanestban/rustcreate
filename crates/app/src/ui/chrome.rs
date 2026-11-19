@@ -224,7 +224,7 @@ impl App {
       let palette = theme::palette(ui);
       Frame::popup(ui.style()).fill(palette.panel).corner_radius(theme::PANEL_RADIUS).inner_margin(Margin::same(12)).show(ui, |ui| {
         ui.set_width(match popover {
-          Popover::Color => 260.0,
+          Popover::Color => 280.0,
           Popover::Brushes => 330.0,
           Popover::Layers => 320.0,
           _ => 280.0,
@@ -571,91 +571,110 @@ impl App {
         }
       });
     });
-    ui.add_space(6.0);
+    ui.add_space(8.0);
+    // Changes that add, remove or reorder layers wait until the panel is drawn: indices taken
+    // while drawing would point past the end or at another layer.
+    let mut action: Option<LayerAction> = None;
     let palette = theme::palette(ui);
-    let tall = (ui.ctx().content_rect().height() * 0.55).clamp(220.0, 480.0);
-    egui::ScrollArea::vertical().max_height(tall).show(ui, |ui| {
+    let tall = (ui.ctx().content_rect().height() * 0.5).clamp(200.0, 460.0);
+    egui::ScrollArea::vertical().max_height(tall).auto_shrink([false, true]).show(ui, |ui| {
+      ui.spacing_mut().item_spacing.y = 6.0;
       for index in (0..self.doc.layers().len()).rev() {
         let layer = &self.doc.layers()[index];
-        let (id, hidden, locked) = (layer.id, layer.hidden, layer.locked);
-        // A clipped layer is marked with an arrow into the layer below.
+        let (id, hidden, locked, group, text) = (layer.id, layer.hidden, layer.locked, layer.is_group(), layer.text().is_some());
         let name = layer.name.clone();
+        // A clipped layer is marked with an arrow into the layer below, a mask with ◐.
         let mut shown = if layer.clip && index > 0 { format!("↳ {name}") } else { name.clone() };
-        if layer.is_group() {
-          shown = format!("▸ {shown}");
-        }
         if layer.mask.is_some() {
-          shown.push_str(" ◐");
+          shown.push_str("  ◐");
         }
-        // Children are indented under their group.
-        let indent = self.doc.depth(index) as f32 * 14.0;
+        let indent = self.doc.depth(index) as f32 * 16.0;
         let active = index == self.doc.active();
-        Frame::NONE.fill(if active { palette.selected } else { palette.control }).corner_radius(6).inner_margin(Margin::symmetric(8, 3)).show(
-          ui,
-          |ui| {
-            ui.set_width(ui.available_width());
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-              if icons::button(ui, if hidden { Icon::EyeOff } else { Icon::Eye }, false, true, &self.i18n.tr("ui-layer-visible")).clicked() {
-                self.doc.checkpoint();
-                self.doc.layer_mut(index).expect("layer").hidden = !hidden;
-              }
-              if icons::button(ui, Icon::Lock, locked, true, &self.i18n.tr("ui-layer-lock")).clicked() {
-                self.doc.checkpoint();
-                self.doc.layer_mut(index).expect("layer").locked = !locked;
-              }
-              // The name takes the rest of the row: a click selects, a double click renames.
-              let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
-              let text = rect.with_min_x(rect.left() + indent);
-              if self.renaming.as_ref().is_some_and(|(layer, _)| *layer == id) {
-                let (_, typed) = self.renaming.as_mut().expect("renaming");
-                let edit = ui.put(text, egui::TextEdit::singleline(typed).font(egui::FontId::proportional(14.5)));
-                edit.request_focus();
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                  self.renaming = None;
-                } else if edit.lost_focus() {
-                  let (_, typed) = self.renaming.take().expect("renaming");
-                  if !typed.trim().is_empty() && typed != name {
-                    self.doc.rename_layer(index, typed.trim());
-                  }
-                }
-              } else {
-                let color = if hidden { palette.muted } else { palette.ink };
-                let galley = ui.painter().layout_no_wrap(shown, egui::FontId::proportional(14.5), color);
-                let at = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text).min;
-                ui.painter().with_clip_rect(text).galley(at, galley, color);
-                if response.double_clicked() {
-                  self.renaming = Some((id, name.clone()));
-                } else if response.clicked() {
-                  self.doc.select(index);
-                }
-                response.context_menu(|ui| {
-                  if ui.button(self.i18n.tr("ui-layer-rename")).clicked() {
-                    self.renaming = Some((id, name.clone()));
-                    ui.close();
-                  }
-                  if ui.button(self.i18n.tr("ui-layer-duplicate")).clicked() {
-                    self.doc.duplicate_layer(index);
-                    ui.close();
-                  }
-                  if ui.add_enabled(self.doc.layers().len() > 1, egui::Button::new(self.i18n.tr("ui-layer-delete"))).clicked() {
-                    self.doc.delete_layer(index);
-                    ui.close();
-                  }
-                });
-              }
-            });
-          },
-        );
-        ui.add_space(3.0);
+
+        // The whole row selects; the eye and the lock sit on top of it.
+        let (rect, row) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
+        let fill = if active {
+          palette.selected
+        } else if row.hovered() {
+          palette.control.gamma_multiply(1.4)
+        } else {
+          palette.control
+        };
+        ui.painter().rect_filled(rect, 8, fill);
+        let button_at = |n: f32| egui::Rect::from_center_size(egui::pos2(rect.right() - 22.0 - n * 34.0, rect.center().y), Vec2::splat(32.0));
+        if ui
+          .put(button_at(0.0), |ui: &mut egui::Ui| {
+            icons::button(ui, if hidden { Icon::EyeOff } else { Icon::Eye }, false, true, &self.i18n.tr("ui-layer-visible"))
+          })
+          .clicked()
+        {
+          self.doc.checkpoint();
+          self.doc.layer_mut(index).expect("layer").hidden = !hidden;
+        }
+        if ui.put(button_at(1.0), |ui: &mut egui::Ui| icons::button(ui, Icon::Lock, locked, true, &self.i18n.tr("ui-layer-lock"))).clicked() {
+          self.doc.checkpoint();
+          self.doc.layer_mut(index).expect("layer").locked = !locked;
+        }
+        // A small badge says what kind of layer it is: a group, a text, or plain pixels.
+        let badge = egui::Rect::from_center_size(egui::pos2(rect.left() + 22.0 + indent, rect.center().y), Vec2::splat(20.0));
+        let ink = if hidden { palette.muted } else { palette.ink };
+        if group || text {
+          icons::paint(ui.painter(), badge, if group { Icon::Layers } else { Icon::Text }, ink);
+        } else {
+          ui.painter().rect_stroke(badge.shrink(2.0), 3, Stroke::new(1.2, palette.muted), egui::StrokeKind::Inside);
+        }
+        let label = egui::Rect::from_min_max(egui::pos2(badge.right() + 10.0, rect.top()), egui::pos2(button_at(1.0).left() - 6.0, rect.bottom()));
+        if self.renaming.as_ref().is_some_and(|(layer, _)| *layer == id) {
+          let (_, typed) = self.renaming.as_mut().expect("renaming");
+          let edit = ui.put(label.shrink2(vec2(0.0, 6.0)), egui::TextEdit::singleline(typed).font(egui::FontId::proportional(14.5)));
+          edit.request_focus();
+          if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.renaming = None;
+          } else if edit.lost_focus() {
+            let (_, typed) = self.renaming.take().expect("renaming");
+            if !typed.trim().is_empty() && typed != name {
+              self.doc.rename_layer(index, typed.trim());
+            }
+          }
+        } else {
+          let galley = ui.painter().layout_no_wrap(shown, egui::FontId::proportional(14.5), ink);
+          let at = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), label).min;
+          ui.painter().with_clip_rect(label).galley(at, galley, ink);
+        }
+        if row.double_clicked() {
+          self.renaming = Some((id, name.clone()));
+        } else if row.clicked() {
+          self.doc.select(index);
+        }
+        row.context_menu(|ui| {
+          if ui.button(self.i18n.tr("ui-layer-rename")).clicked() {
+            self.renaming = Some((id, name.clone()));
+            ui.close();
+          }
+          if ui.button(self.i18n.tr("ui-layer-duplicate")).clicked() {
+            action = Some(LayerAction::Duplicate(index));
+            ui.close();
+          }
+          if ui.add_enabled(index > 0, egui::Button::new(self.i18n.tr("ui-layer-merge-down"))).clicked() {
+            action = Some(LayerAction::MergeDown(index));
+            ui.close();
+          }
+          if ui.add_enabled(self.doc.layers().len() > 1, egui::Button::new(self.i18n.tr("ui-layer-delete"))).clicked() {
+            action = Some(LayerAction::Delete(index));
+            ui.close();
+          }
+        });
       }
     });
 
     // The active layer's properties and actions.
+    ui.add_space(4.0);
     ui.separator();
+    ui.add_space(4.0);
     let index = self.doc.active();
     let layer = &self.doc.layers()[index];
-    let (mut opacity, mut blend) = (layer.opacity * 100.0, layer.blend);
-    ui.horizontal(|ui| {
+    let (mut opacity, mut blend, is_group) = (layer.opacity * 100.0, layer.blend, layer.is_group());
+    egui::Grid::new("layer-properties").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
       ui.label(self.i18n.tr("ui-layer-opacity"));
       let response = ui.add(egui::Slider::new(&mut opacity, 0.0..=100.0).suffix(" %").fixed_decimals(0));
       if response.changed() {
@@ -669,11 +688,10 @@ impl App {
       if !response.dragged() {
         self.editing_slider = false;
       }
-    });
-    ui.horizontal(|ui| {
+      ui.end_row();
       ui.label(self.i18n.tr("ui-layer-blend"));
       let current = BLEND_MODES.iter().find(|(mode, _)| *mode == blend).map_or("ui-blend-normal", |(_, id)| id);
-      egui::ComboBox::from_id_salt("blend").selected_text(self.i18n.tr(current)).show_ui(ui, |ui| {
+      egui::ComboBox::from_id_salt("blend").selected_text(self.i18n.tr(current)).width(170.0).show_ui(ui, |ui| {
         for (i, (mode, id)) in BLEND_MODES.into_iter().enumerate() {
           if BLEND_GROUPS.contains(&i) {
             ui.separator();
@@ -681,11 +699,13 @@ impl App {
           ui.selectable_value(&mut blend, mode, self.i18n.tr(id));
         }
       });
+      ui.end_row();
     });
     if blend != self.doc.layers()[index].blend {
       self.doc.checkpoint();
       self.doc.layer_mut(index).expect("layer").blend = blend;
     }
+    ui.add_space(4.0);
     let (mut alpha_lock, mut clip) = (self.doc.layers()[index].alpha_lock, self.doc.layers()[index].clip);
     ui.horizontal(|ui| {
       ui.checkbox(&mut alpha_lock, self.i18n.tr("ui-layer-alpha-lock")).on_hover_text(self.i18n.tr("ui-layer-alpha-lock-help"));
@@ -697,7 +717,7 @@ impl App {
       (layer.alpha_lock, layer.clip) = (alpha_lock, clip);
     }
     // The layer mask: black hides, white shows; painting goes to it while "Edit mask" is on.
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
       if self.doc.layers()[index].mask.is_none() {
         if ui.button(self.i18n.tr("ui-mask-add")).on_hover_text(self.i18n.tr("ui-mask-help")).clicked() {
           self.doc.add_mask(index);
@@ -715,22 +735,44 @@ impl App {
         }
       }
     });
+    ui.add_space(4.0);
+    ui.separator();
     ui.horizontal(|ui| {
       if icons::button(ui, Icon::Duplicate, false, true, &self.i18n.tr("ui-layer-duplicate")).clicked() {
-        self.doc.duplicate_layer(index);
+        action = Some(LayerAction::Duplicate(index));
       }
       if icons::button(ui, Icon::MergeDown, false, index > 0, &self.i18n.tr("ui-layer-merge-down")).clicked() {
-        self.doc.merge_down(index);
+        action = Some(LayerAction::MergeDown(index));
       }
       if icons::button(ui, Icon::Trash, false, self.doc.layers().len() > 1, &self.i18n.tr("ui-layer-delete")).clicked() {
-        self.doc.delete_layer(index);
+        action = Some(LayerAction::Delete(index));
       }
-      if ui.button(self.i18n.tr("ui-layer-group")).on_hover_text("Ctrl+G").clicked() {
-        self.doc.group_layer(index);
-      }
-      if self.doc.layers()[index].is_group() && ui.button(self.i18n.tr("ui-layer-ungroup")).on_hover_text("Ctrl+Shift+G").clicked() {
-        self.doc.ungroup(index);
-      }
+      ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        if is_group && ui.button(self.i18n.tr("ui-layer-ungroup")).on_hover_text("Ctrl+Shift+G").clicked() {
+          action = Some(LayerAction::Ungroup(index));
+        }
+        if ui.button(self.i18n.tr("ui-layer-group")).on_hover_text("Ctrl+G").clicked() {
+          action = Some(LayerAction::Group(index));
+        }
+      });
     });
+
+    match action {
+      Some(LayerAction::Duplicate(i)) => self.doc.duplicate_layer(i),
+      Some(LayerAction::MergeDown(i)) => self.doc.merge_down(i),
+      Some(LayerAction::Delete(i)) => self.doc.delete_layer(i),
+      Some(LayerAction::Group(i)) => self.doc.group_layer(i),
+      Some(LayerAction::Ungroup(i)) => self.doc.ungroup(i),
+      None => false,
+    };
   }
+}
+
+/// A layer panel change that adds, removes or reorders layers, applied after drawing.
+enum LayerAction {
+  Duplicate(usize),
+  MergeDown(usize),
+  Delete(usize),
+  Group(usize),
+  Ungroup(usize),
 }

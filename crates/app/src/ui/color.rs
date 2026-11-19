@@ -66,7 +66,7 @@ fn rgb(hsv: Hsva) -> [u8; 3] {
 /// The hue ring and the saturation/brightness square inside it. `marks` are extra hues shown on
 /// the ring (harmonies). True when the color changed.
 fn disc(ui: &mut egui::Ui, hsv: &mut Hsva, marks: &[f32]) -> bool {
-  let size = 220.0;
+  let size = 236.0;
   let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click_and_drag());
   let center = rect.center();
   let (outer, inner) = (size / 2.0, size / 2.0 - 20.0);
@@ -138,14 +138,36 @@ fn disc(ui: &mut egui::Ui, hsv: &mut Hsva, marks: &[f32]) -> bool {
   changed
 }
 
-/// A clickable color square.
-fn swatch(ui: &mut egui::Ui, [r, g, b]: [u8; 3], size: f32) -> egui::Response {
+/// A clickable color square, outlined when hovered or when it is the current color.
+fn swatch(ui: &mut egui::Ui, [r, g, b]: [u8; 3], size: f32, current: bool) -> egui::Response {
   let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
-  ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(r, g, b));
-  if response.hovered() {
-    ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.5, ui.visuals().strong_text_color()), egui::StrokeKind::Outside);
+  let radius = (size * 0.2).min(6.0);
+  ui.painter().rect_filled(rect, radius, Color32::from_rgb(r, g, b));
+  // A faint edge so near-panel colors (black on dark, white on light) still show their shape.
+  ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, theme::palette(ui).line), egui::StrokeKind::Inside);
+  if response.hovered() || current {
+    ui.painter().rect_stroke(
+      rect.expand(1.5),
+      radius + 1.5,
+      Stroke::new(2.0, if current { theme::ACCENT } else { ui.visuals().strong_text_color() }),
+      egui::StrokeKind::Outside,
+    );
   }
   response
+}
+
+/// Equal-width buttons in a row, one of them selected.
+fn segmented<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, items: &[(T, String)]) {
+  let gap = 4.0;
+  let width = (ui.available_width() - gap * (items.len() as f32 - 1.0)) / items.len() as f32;
+  ui.horizontal(|ui| {
+    ui.spacing_mut().item_spacing.x = gap;
+    for (item, label) in items {
+      if ui.add(egui::Button::new(label.as_str()).selected(*value == *item).min_size(Vec2::new(width, 30.0))).clicked() {
+        *value = *item;
+      }
+    }
+  });
 }
 
 impl App {
@@ -154,18 +176,53 @@ impl App {
     let primary = self.canvas.tools.primary;
     // Keep the hue while saturation or brightness is 0, where RGB forgets it.
     let mut hsv = self.color_hsv.filter(|hsv| rgb(*hsv) == primary).unwrap_or_else(|| Hsva::from_srgb(primary));
-    ui.horizontal(|ui| {
-      for (tab, id) in
-        [(Tab::Disc, "ui-color-disc"), (Tab::Classic, "ui-color-classic"), (Tab::Harmony, "ui-color-harmony"), (Tab::Palettes, "ui-color-palettes")]
-      {
-        ui.selectable_value(&mut self.color_tab, tab, self.i18n.tr(id));
-      }
-    });
-    ui.add_space(6.0);
     let mut picked = None;
+
+    // The current color large, the secondary beside it (click or X swaps), and its hex code.
+    ui.horizontal(|ui| {
+      swatch(ui, primary, 48.0, false);
+      let secondary = self.canvas.tools.secondary;
+      ui.vertical(|ui| {
+        ui.add_space(14.0);
+        if swatch(ui, secondary, 28.0, false).on_hover_text(self.i18n.tr("ui-color-swap")).clicked() {
+          let tools = &mut self.canvas.tools;
+          std::mem::swap(&mut tools.primary, &mut tools.secondary);
+          picked = Some(tools.primary);
+          hsv = Hsva::from_srgb(tools.primary);
+        }
+      });
+      ui.add_space(6.0);
+      ui.vertical(|ui| {
+        ui.add_space(4.0);
+        // Hex, edited as text; shows the current color whenever it is not being typed in.
+        let id = egui::Id::unique("color-hex");
+        if !ui.memory(|m| m.has_focus(id)) {
+          let [r, g, b] = picked.unwrap_or(primary);
+          self.color_hex = format!("{r:02X}{g:02X}{b:02X}");
+        }
+        ui.horizontal(|ui| {
+          ui.label(RichText::new("#").color(theme::palette(ui).muted));
+          let response =
+            ui.add(egui::TextEdit::singleline(&mut self.color_hex).id(id).desired_width(90.0).char_limit(7).font(egui::TextStyle::Monospace));
+          if response.changed()
+            && let Some(color) = parse_hex(&self.color_hex)
+          {
+            picked = Some(color);
+            hsv = Hsva::from_srgb(color);
+          }
+        });
+        let [r, g, b] = picked.unwrap_or(primary);
+        ui.label(RichText::new(format!("R {r}  G {g}  B {b}")).small().color(theme::palette(ui).muted));
+      });
+    });
+    ui.add_space(10.0);
+    let tabs =
+      [(Tab::Disc, "ui-color-disc"), (Tab::Classic, "ui-color-classic"), (Tab::Harmony, "ui-color-harmony"), (Tab::Palettes, "ui-color-palettes")];
+    segmented(ui, &mut self.color_tab, &tabs.map(|(tab, id)| (tab, self.i18n.tr(id))));
+    ui.add_space(10.0);
     match self.color_tab {
       Tab::Disc => {
-        if disc(ui, &mut hsv, &[]) {
+        if ui.vertical_centered(|ui| disc(ui, &mut hsv, &[])).inner {
           picked = Some(rgb(hsv));
         }
       }
@@ -178,18 +235,21 @@ impl App {
         }
       }
       Tab::Harmony => {
-        egui::ComboBox::from_id_salt("harmony").selected_text(self.i18n.tr(self.harmony.name())).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("harmony").selected_text(self.i18n.tr(self.harmony.name())).width(ui.available_width()).show_ui(ui, |ui| {
           for harmony in Harmony::ALL {
             ui.selectable_value(&mut self.harmony, harmony, self.i18n.tr(harmony.name()));
           }
         });
         let marks: Vec<f32> = self.harmony.colors(hsv).iter().skip(1).map(|c| c.h).collect();
-        if disc(ui, &mut hsv, &marks) {
+        ui.add_space(6.0);
+        if ui.vertical_centered(|ui| disc(ui, &mut hsv, &marks)).inner {
           picked = Some(rgb(hsv));
         }
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
+          ui.spacing_mut().item_spacing.x = 8.0;
           for color in self.harmony.colors(hsv) {
-            if swatch(ui, rgb(color), 36.0).clicked() {
+            if swatch(ui, rgb(color), 40.0, rgb(color) == primary).clicked() {
               picked = Some(rgb(color));
               hsv = color;
             }
@@ -203,24 +263,6 @@ impl App {
         }
       }
     }
-    ui.add_space(6.0);
-    // Hex, edited as text; shows the current color whenever it is not being typed in.
-    let id = egui::Id::unique("color-hex");
-    if !ui.memory(|m| m.has_focus(id)) {
-      let [r, g, b] = picked.unwrap_or(primary);
-      self.color_hex = format!("{r:02X}{g:02X}{b:02X}");
-    }
-    ui.horizontal(|ui| {
-      ui.label("#");
-      let response = ui.add(egui::TextEdit::singleline(&mut self.color_hex).id(id).desired_width(80.0).char_limit(7));
-      if response.changed()
-        && let Some(color) = parse_hex(&self.color_hex)
-      {
-        picked = Some(color);
-        hsv = Hsva::from_srgb(color);
-      }
-      ui.label(RichText::new(self.i18n.tr("ui-color-hex")).color(theme::palette(ui).muted));
-    });
     if let Some(color) = picked {
       self.canvas.tools.primary = color;
     }
@@ -228,11 +270,13 @@ impl App {
 
     let recent = self.canvas.tools.recent.clone();
     if !recent.is_empty() {
-      ui.add_space(8.0);
-      ui.label(RichText::new(self.i18n.tr("ui-color-history")).color(theme::palette(ui).muted));
+      ui.add_space(10.0);
+      ui.separator();
+      ui.label(RichText::new(self.i18n.tr("ui-color-history")).small().color(theme::palette(ui).muted));
       ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::splat(6.0);
         for color in recent {
-          if swatch(ui, color, 22.0).clicked() {
+          if swatch(ui, color, 26.0, color == self.canvas.tools.primary).clicked() {
             self.canvas.tools.primary = color;
           }
         }
@@ -246,7 +290,7 @@ impl App {
     self.palette = self.palette.min(list.len() - 1);
     let mut picked = None;
     ui.horizontal(|ui| {
-      egui::ComboBox::from_id_salt("palette").selected_text(list[self.palette].name.clone()).width(150.0).show_ui(ui, |ui| {
+      egui::ComboBox::from_id_salt("palette").selected_text(list[self.palette].name.clone()).width(ui.available_width() - 70.0).show_ui(ui, |ui| {
         for (i, palette) in list.iter().enumerate() {
           ui.selectable_value(&mut self.palette, i, &palette.name);
         }
@@ -261,13 +305,13 @@ impl App {
       }
     });
     let palette = &mut list[self.palette];
-    ui.text_edit_singleline(&mut palette.name);
-    ui.add_space(4.0);
+    ui.add(egui::TextEdit::singleline(&mut palette.name).desired_width(f32::INFINITY));
+    ui.add_space(8.0);
     let mut remove = None;
     ui.horizontal_wrapped(|ui| {
-      ui.set_max_width(240.0);
+      ui.spacing_mut().item_spacing = Vec2::splat(6.0);
       for (i, &color) in palette.colors.iter().enumerate() {
-        let response = swatch(ui, color, 26.0);
+        let response = swatch(ui, color, 30.0, color == current);
         if response.clicked() {
           picked = Some(color);
         }
@@ -275,7 +319,7 @@ impl App {
           remove = Some(i);
         }
       }
-      let (rect, response) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::click());
+      let (rect, response) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::click());
       ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.0, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
       ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "+", egui::FontId::proportional(16.0), ui.visuals().text_color());
       if response.on_hover_text(self.i18n.tr("ui-palette-add-color")).clicked() && !palette.colors.contains(&current) {
@@ -285,7 +329,9 @@ impl App {
     if let Some(i) = remove {
       palette.colors.remove(i);
     }
+    ui.add_space(4.0);
     ui.label(RichText::new(self.i18n.tr("ui-palette-remove-help")).small().color(theme::palette(ui).muted));
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
       if ui.button(self.i18n.tr("ui-palette-import")).on_hover_text(self.i18n.tr("ui-palette-import-help")).clicked() {
         self.import_palettes();

@@ -84,4 +84,17 @@ pub fn install(ctx: &egui::Context) {
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, palette.line);
     ctx.set_visuals_of(theme, visuals);
   }
+  // Roomier than egui's defaults: panels are used with a pen as much as with a mouse.
+  ctx.all_styles_mut(|style| {
+    style.spacing.item_spacing = egui::vec2(8.0, 7.0);
+    style.spacing.button_padding = egui::vec2(10.0, 5.0);
+    style.spacing.interact_size.y = 26.0;
+    style.spacing.slider_width = 150.0;
+    style.spacing.combo_height = 320.0;
+    for (text_style, size) in [(egui::TextStyle::Body, 14.0), (egui::TextStyle::Button, 14.0), (egui::TextStyle::Small, 11.5)] {
+      if let Some(font) = style.text_styles.get_mut(&text_style) {
+        font.size = size;
+      }
+    }
+  });
 }
