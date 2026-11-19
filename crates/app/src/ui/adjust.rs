@@ -1,5 +1,6 @@
-//! The Adjustments menu and its dialogs: Hue/Saturation, Brightness/Contrast, Levels and
-//! Curves preview live on the canvas; Invert and Desaturate apply at once.
+//! The Adjustments menu and its dialogs: Hue/Saturation, Brightness/Contrast, Levels, Curves
+//! and the filters (Gaussian Blur, Unsharp Mask, Add Noise) preview live on the canvas; Invert
+//! and Desaturate apply at once.
 
 use eframe::egui::{self, Align2, Color32, Pos2, Sense, Vec2, vec2};
 use rustcreate_core::{Adjust, Adjustment};
@@ -17,7 +18,7 @@ pub(crate) struct Adjusting {
 }
 
 /// The menu: name token and the settings it starts from (no change).
-pub(crate) fn menu() -> [(&'static str, Adjustment); 6] {
+pub(crate) fn menu() -> [(&'static str, Adjustment); 9] {
   [
     ("ui-adjust-hue-saturation", Adjustment::HueSaturation { hue: 0.0, saturation: 0.0, lightness: 0.0 }),
     ("ui-adjust-brightness-contrast", Adjustment::BrightnessContrast { brightness: 0.0, contrast: 0.0 }),
@@ -25,6 +26,9 @@ pub(crate) fn menu() -> [(&'static str, Adjustment); 6] {
     ("ui-adjust-curves", Adjustment::Curves(vec![(0.0, 0.0), (1.0, 1.0)])),
     ("ui-adjust-invert", Adjustment::Invert),
     ("ui-adjust-desaturate", Adjustment::Desaturate),
+    ("ui-adjust-gaussian-blur", Adjustment::GaussianBlur { radius: 0.0 }),
+    ("ui-adjust-unsharp-mask", Adjustment::UnsharpMask { radius: 1.0, amount: 0.0, threshold: 0.0 }),
+    ("ui-adjust-add-noise", Adjustment::AddNoise { amount: 0.0, monochrome: false }),
   ]
 }
 
@@ -35,7 +39,11 @@ fn same_kind(a: &Adjustment, b: &Adjustment) -> bool {
 impl App {
   pub(crate) fn adjust_menu(&mut self, ui: &mut egui::Ui) {
     ui.set_width(220.0);
-    for (id, settings) in menu() {
+    for (i, (id, settings)) in menu().into_iter().enumerate() {
+      // Filters after the color adjustments.
+      if i == 6 {
+        ui.separator();
+      }
       if ui.add_sized([ui.available_width(), 28.0], egui::Button::new(self.i18n.tr(id))).clicked() {
         self.start_adjust(settings);
       }
@@ -92,6 +100,21 @@ impl App {
         Adjustment::Curves(points) => {
           curves(ui, points, &mut adjusting.drag);
           ui.label(egui::RichText::new(i18n.tr("ui-adjust-curves-help")).small());
+        }
+        Adjustment::GaussianBlur { radius } => {
+          ui.label(i18n.tr("ui-adjust-radius"));
+          ui.add(egui::Slider::new(radius, 0.0..=100.0).suffix(" px").fixed_decimals(1));
+        }
+        Adjustment::UnsharpMask { radius, amount, threshold } => {
+          ui.label(i18n.tr("ui-adjust-amount"));
+          ui.add(egui::Slider::new(amount, 0.0..=5.0).fixed_decimals(2));
+          ui.label(i18n.tr("ui-adjust-radius"));
+          ui.add(egui::Slider::new(radius, 0.1..=50.0).suffix(" px").fixed_decimals(1));
+          slider(ui, "ui-adjust-threshold", threshold, 0.0..=1.0);
+        }
+        Adjustment::AddNoise { amount, monochrome } => {
+          slider(ui, "ui-adjust-amount", amount, 0.0..=1.0);
+          ui.checkbox(monochrome, i18n.tr("ui-adjust-monochrome"));
         }
         Adjustment::Invert | Adjustment::Desaturate => {}
       }

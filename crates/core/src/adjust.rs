@@ -1,4 +1,5 @@
-//! Adjustments (Photoshop's Image > Adjustments): color changes to the active layer, or to its
+//! Adjustments and filters (Photoshop's Image > Adjustments and Filter): color changes, blur,
+//! sharpening and noise to the active layer, or to its
 //! mask while editing it, inside the selection. Each change redraws from the pixels there were
 //! when the adjustment began, so a dialog can preview live; it is one undo step, and cancelling
 //! puts everything back.
@@ -31,6 +32,22 @@ pub enum Adjustment {
   Curves(Vec<(f32, f32)>),
   Invert,
   Desaturate,
+  /// Radius in pixels (about one standard deviation).
+  GaussianBlur {
+    radius: f32,
+  },
+  /// Sharpens by `amount` (0..=5) times the difference from a blur of `radius` pixels, where
+  /// that difference is at least `threshold` (0..=1).
+  UnsharpMask {
+    radius: f32,
+    amount: f32,
+    threshold: f32,
+  },
+  /// `amount` 0..=1; monochrome adds the same noise to every channel.
+  AddNoise {
+    amount: f32,
+    monochrome: bool,
+  },
 }
 
 /// An adjustment ready to run per pixel: a table for the ones that treat each channel alike.
@@ -66,6 +83,9 @@ impl Adjustment {
       Adjustment::Curves(points) => {
         let curve = curve(points);
         table(&|v| curve(v))
+      }
+      Adjustment::GaussianBlur { .. } | Adjustment::UnsharpMask { .. } | Adjustment::AddNoise { .. } => {
+        unreachable!("filters read neighbors and run in Adjust::filter")
       }
     }
   }
@@ -186,15 +206,13 @@ impl Document {
     }
     let mask = self.editing_mask();
     let layer = self.target();
-    let original: HashMap<_, _> = if mask {
-      let (cols, rows) = (self.width.div_ceil(TILE), self.height.div_ceil(TILE));
-      (0..rows).flat_map(|ty| (0..cols).map(move |tx| (tx, ty))).map(|key| (key, layer.tiles.get(&key).cloned())).collect()
-    } else {
-      layer.tiles.iter().map(|(&key, tile)| (key, Some(tile.clone()))).collect()
-    };
-    if original.is_empty() {
+    if !mask && layer.tiles.is_empty() {
       return None;
     }
+    // Every tile: a blur spreads paint into empty ones.
+    let (cols, rows) = (self.width.div_ceil(TILE), self.height.div_ceil(TILE));
+    let original: HashMap<_, _> =
+      (0..rows).flat_map(|ty| (0..cols).map(move |tx| (tx, ty))).map(|key| (key, layer.tiles.get(&key).cloned())).collect();
     let layer_id = layer.id;
     self.checkpoint();
     Some(Adjust { layer_id, mask, original, selection: self.selection.clone() })
@@ -211,8 +229,12 @@ impl Document {
 impl Adjust {
   /// Redraws the adjusted pixels for these settings. Tiles are split across the CPU's cores.
   pub fn update(&self, doc: &mut Document, adjustment: &Adjustment) {
+    if matches!(adjustment, Adjustment::GaussianBlur { .. } | Adjustment::UnsharpMask { .. } | Adjustment::AddNoise { .. }) {
+      return self.filter(doc, adjustment);
+    }
     let compiled = adjustment.compile();
-    let entries: Vec<_> = self.original.iter().collect();
+    // Color changes leave empty tiles empty.
+    let entries: Vec<_> = self.original.iter().filter(|(_, before)| self.mask || before.is_some()).collect();
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(entries.len().max(1));
     let tiles: Vec<((u32, u32), Vec<u8>)> = std::thread::scope(|scope| {
       let workers: Vec<_> = entries
@@ -255,10 +277,191 @@ impl Adjust {
     out
   }
 
+  /// Blur, sharpening and noise read neighbors, so they work on the whole layer at once.
+  // shortcut: redraws the whole canvas on the CPU on every change; move it to the GPU if big
+  // canvases drag.
+  fn filter(&self, doc: &mut Document, adjustment: &Adjustment) {
+    let (w, h) = (doc.width as usize, doc.height as usize);
+    // The layer as it was, premultiplied; a mask as opaque gray over white.
+    let mut image = vec![[0u8; 4]; w * h];
+    for (&(tx, ty), before) in &self.original {
+      for y in 0..TILE as usize {
+        for x in 0..TILE as usize {
+          let (px, py) = (tx as usize * TILE as usize + x, ty as usize * TILE as usize + y);
+          if px >= w || py >= h {
+            continue;
+          }
+          let p: [u8; 4] = before.as_deref().map_or([0; 4], |t| t[(y * TILE as usize + x) * 4..][..4].try_into().expect("4 bytes"));
+          image[py * w + px] = if self.mask {
+            let gray = |c: usize| (p[c] as u32 + 255 - p[3] as u32).min(255) as u8;
+            [gray(0), gray(1), gray(2), 255]
+          } else {
+            p
+          };
+        }
+      }
+    }
+    let result: Vec<[u8; 4]> = match *adjustment {
+      Adjustment::GaussianBlur { radius } => blur(&image, w, h, radius),
+      Adjustment::UnsharpMask { radius, amount, threshold } => {
+        let blurred = blur(&image, w, h, radius);
+        let (amount, threshold) = (amount.clamp(0.0, 5.0), threshold.clamp(0.0, 1.0) * 255.0);
+        image
+          .iter()
+          .zip(&blurred)
+          .map(|(o, b)| {
+            let mut out = *o;
+            for c in 0..3 {
+              let d = o[c] as f32 - b[c] as f32;
+              if d.abs() >= threshold.max(0.5) {
+                out[c] = (o[c] as f32 + amount * d).round().clamp(0.0, o[3] as f32) as u8;
+              }
+            }
+            out
+          })
+          .collect()
+      }
+      Adjustment::AddNoise { amount, monochrome } => {
+        let amount = amount.clamp(0.0, 1.0);
+        image
+          .iter()
+          .enumerate()
+          .map(|(i, o)| {
+            let mut out = *o;
+            for c in 0..3 {
+              let n = noise(i, if monochrome { 0 } else { c });
+              out[c] = (o[c] as f32 + n * amount * o[3] as f32).round().clamp(0.0, o[3] as f32) as u8;
+            }
+            out
+          })
+          .collect()
+      }
+      _ => unreachable!("only filters come here"),
+    };
+    let selection = self.selection.as_ref();
+    let Some(layer) = doc.find_mut(self.layer_id) else { return };
+    for (&(tx, ty), before) in &self.original {
+      let mut out = before.as_deref().map_or_else(|| vec![0; TILE_BYTES], <[u8]>::to_vec);
+      let mut painted = false;
+      for y in 0..TILE as usize {
+        for x in 0..TILE as usize {
+          let (px, py) = (tx as usize * TILE as usize + x, ty as usize * TILE as usize + y);
+          if px >= w || py >= h {
+            continue;
+          }
+          let (from, to) = (image[py * w + px], result[py * w + px]);
+          let weight = Selection::weight(selection, px as u32, py as u32);
+          let o = &mut out[(y * TILE as usize + x) * 4..][..4];
+          for c in 0..4 {
+            o[c] = (from[c] as f32 + (to[c] as f32 - from[c] as f32) * weight).round() as u8;
+          }
+          painted |= o[3] > 0;
+        }
+      }
+      if before.is_none() && !painted && !self.mask {
+        continue;
+      }
+      layer.set_tile((tx, ty), Some(Arc::from(out)));
+    }
+  }
+
   /// Puts every pixel back and drops the undo step.
   pub fn cancel(self, doc: &mut Document) {
     doc.rollback();
   }
+}
+
+/// Three box blurs ≈ a Gaussian of standard deviation `radius`, on premultiplied pixels (so
+/// color does not bleed from transparent areas).
+fn blur(image: &[[u8; 4]], w: usize, h: usize, radius: f32) -> Vec<[u8; 4]> {
+  let r = ((((4.0 * radius.clamp(0.0, 250.0).powi(2) + 1.0).sqrt() - 1.0) / 2.0).round()) as usize;
+  if r == 0 {
+    return image.to_vec();
+  }
+  let mut out = image.to_vec();
+  let (mut values, mut scratch) = (vec![0f32; image.len()], vec![0f32; image.len()]);
+  for c in 0..4 {
+    for (v, p) in values.iter_mut().zip(image) {
+      *v = p[c] as f32;
+    }
+    for _ in 0..3 {
+      blur_rows(&values, &mut scratch, w, r);
+      blur_columns(&scratch, &mut values, w, h, r);
+    }
+    for (o, v) in out.iter_mut().zip(&values) {
+      o[c] = v.round().clamp(0.0, 255.0) as u8;
+    }
+  }
+  for o in &mut out {
+    for c in 0..3 {
+      o[c] = o[c].min(o[3]);
+    }
+  }
+  out
+}
+
+/// One running-sum box blur of radius `r` along every row of `len` values, edges clamped; the
+/// rows are split across the CPU's cores.
+fn blur_rows(from: &[f32], to: &mut [f32], len: usize, r: usize) {
+  let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+  let chunk = (from.len() / len).div_ceil(threads).max(1) * len;
+  std::thread::scope(|scope| {
+    for (src, dst) in from.chunks(chunk).zip(to.chunks_mut(chunk)) {
+      scope.spawn(move || {
+        for (row, out) in src.chunks(len).zip(dst.chunks_mut(len)) {
+          let n = row.len() as isize;
+          let at = |i: isize| row[i.clamp(0, n - 1) as usize];
+          let size = (2 * r + 1) as f32;
+          let mut sum: f32 = (-(r as isize)..=r as isize).map(at).sum();
+          for (i, o) in out.iter_mut().enumerate() {
+            let i = i as isize;
+            *o = sum / size;
+            sum += at(i + r as isize + 1) - at(i - r as isize);
+          }
+        }
+      });
+    }
+  });
+}
+
+/// The same box blur down every column. Bands of rows run in parallel, each sliding a row
+/// of column sums, so memory is read in order.
+fn blur_columns(from: &[f32], to: &mut [f32], w: usize, h: usize, r: usize) {
+  let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+  let band = h.div_ceil(threads).max(1);
+  let row = |y: isize| &from[y.clamp(0, h as isize - 1) as usize * w..][..w];
+  let size = (2 * r + 1) as f32;
+  std::thread::scope(|scope| {
+    for (k, dst) in to.chunks_mut(band * w).enumerate() {
+      scope.spawn(move || {
+        let y0 = (k * band) as isize;
+        let mut sums = vec![0f32; w];
+        for dy in -(r as isize)..=r as isize {
+          for (s, v) in sums.iter_mut().zip(row(y0 + dy)) {
+            *s += v;
+          }
+        }
+        for (j, out) in dst.chunks_mut(w).enumerate() {
+          let y = y0 + j as isize;
+          for (o, s) in out.iter_mut().zip(&sums) {
+            *o = s / size;
+          }
+          for ((s, add), sub) in sums.iter_mut().zip(row(y + r as isize + 1)).zip(row(y - r as isize)) {
+            *s += add - sub;
+          }
+        }
+      });
+    }
+  });
+}
+
+/// The same noise for a pixel every time (so a slider does not flicker), -1..1.
+fn noise(i: usize, channel: usize) -> f32 {
+  let mut x = (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (channel as u64 + 1).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+  x ^= x >> 31;
+  x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+  x ^= x >> 29;
+  (x >> 40) as f32 / (1u64 << 24) as f32 * 2.0 - 1.0
 }
 
 #[cfg(test)]
@@ -308,6 +511,31 @@ mod tests {
     let values: Vec<f32> = (0..=100).map(|i| c(i as f32 / 100.0)).collect();
     assert!(values.windows(2).all(|w| w[1] >= w[0]), "monotone points give a monotone curve");
     assert!((curve(&[])(0.3) - 0.3).abs() < 1e-5, "no points is the identity");
+  }
+
+  #[test]
+  fn blur_spreads_sharpen_steepens_and_noise_keeps_transparency() {
+    let mut doc = Document::new(20, 20);
+    // One opaque white pixel in the middle of an empty layer.
+    doc.layer_mut(0).unwrap().tile_mut(0, 0)[(10 * 256 + 10) * 4..][..4].copy_from_slice(&[255; 4]);
+    let a = |doc: &Document, x: usize, y: usize| doc.layers()[0].tile(0, 0).unwrap()[(y * 256 + x) * 4 + 3];
+    let adjust = doc.begin_adjust().unwrap();
+    adjust.update(&mut doc, &Adjustment::GaussianBlur { radius: 2.0 });
+    assert!(a(&doc, 10, 10) < 255 && a(&doc, 12, 10) > 0 && a(&doc, 0, 0) == 0, "{} {}", a(&doc, 10, 10), a(&doc, 12, 10));
+    adjust.update(&mut doc, &Adjustment::AddNoise { amount: 1.0, monochrome: false });
+    assert_eq!((a(&doc, 10, 10), a(&doc, 0, 0)), (255, 0), "noise keeps alpha and leaves transparency alone");
+    adjust.cancel(&mut doc);
+
+    // A soft edge between gray levels gets steeper.
+    let mut doc = Document::new(20, 1);
+    let tile = doc.layer_mut(0).unwrap().tile_mut(0, 0);
+    for x in 0..20 {
+      let v = if x < 10 { 100 } else { 150 };
+      tile[x * 4..x * 4 + 4].copy_from_slice(&[v, v, v, 255]);
+    }
+    assert!(doc.adjust(&Adjustment::UnsharpMask { radius: 2.0, amount: 1.0, threshold: 0.0 }));
+    let px = |x: usize| doc.layers()[0].tile(0, 0).unwrap()[x * 4];
+    assert!(px(9) < 100 && px(10) > 150 && px(0) == 100, "{} {} {}", px(9), px(10), px(0));
   }
 
   #[test]

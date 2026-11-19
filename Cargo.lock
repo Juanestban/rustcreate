@@ -3162,7 +3162,7 @@ dependencies = [
 
 [[package]]
 name = "rustcreate"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "eframe",
  "fluent-bundle",
@@ -3185,7 +3185,7 @@ dependencies = [
 
 [[package]]
 name = "rustcreate-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "png 0.18.1",
  "serde",
@@ -3196,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "rustcreate-render"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "pollster 0.4.0",
  "rustcreate-core",
