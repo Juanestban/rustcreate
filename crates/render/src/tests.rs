@@ -214,3 +214,26 @@ fn floating_transform_matches_the_cpu_result() {
     }
   }
 }
+
+#[test]
+fn onion_skin_shows_the_frame_before_faded_and_tinted() {
+  let Some((device, queue)) = device() else {
+    eprintln!("no GPU adapter: skipping");
+    return;
+  };
+  let (width, height) = (64, 4);
+  let mut doc = Document::new(width, height);
+  doc.layer_mut(0).unwrap().tile_mut(0, 0)[..4].copy_from_slice(&[255; 4]);
+  doc.add_layer();
+  doc.animation.enabled = true;
+  let mut renderer = CanvasRenderer::new(&device, wgpu::TextureFormat::Bgra8Unorm, (width, height));
+  renderer.sync(&device, &queue, &mut doc);
+  let gpu = read_back(&device, &queue, renderer.composite_texture(), (width, height));
+  // 40 % of white, 85 % pulled toward the red tint of earlier frames.
+  let [r, g, _] = rustcreate_core::ONION_BEFORE.map(|c| ((0.15 + 0.85 * c as f32 / 255.0) * 0.4 * 255.0).round() as u8);
+  assert!(gpu[0].abs_diff(r) <= 2 && gpu[1].abs_diff(g) <= 2 && gpu[3].abs_diff(102) <= 2, "{:?}", &gpu[..4]);
+  // Playing, there is no onion skin.
+  doc.set_playing(Some(1));
+  renderer.sync(&device, &queue, &mut doc);
+  assert_eq!(read_back(&device, &queue, renderer.composite_texture(), (width, height))[3], 0);
+}

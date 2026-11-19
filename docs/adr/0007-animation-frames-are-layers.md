@@ -26,5 +26,8 @@ so far (layers, groups, masks, the `.rcreate` format).
 
 - No new document structure: painting, undo, files and the layers panel work on frames as they
   are.
-- A separate timeline (several tracks, frames of different lengths) would need a new model. Hold
-  frames and background/foreground frames come as per-frame flags instead.
+- A separate timeline (several tracks) would need a new model. Frames of different lengths are
+  a hold duration on the frame's layer (`hold`, saved with it); the background and foreground
+  frames are the first and last frame, switched on in the animation settings.
+- Onion skin is only on screen: the renderer fades and tints nearby frames (red before, green
+  after); the CPU composite, the eyedropper and exports never see it.

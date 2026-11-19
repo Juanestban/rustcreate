@@ -21,6 +21,8 @@ struct LayerParams {
   clip: u32,
   // 1 = the layer has a mask: gray shows, black hides, transparent counts as white.
   has_mask: u32,
+  // Onion skin: the layer's color pulled toward rgb by a (0 = untouched).
+  tint: vec4<f32>,
 }
 
 @group(0) @binding(0) var below: texture_2d<f32>;
@@ -137,6 +139,7 @@ fn composite(in: FullscreenOut) -> @location(0) vec4<f32> {
   if params.clip == 1u {
     s *= textureLoad(base, p, 0).a;
   }
+  s = vec4<f32>(mix(s.rgb, params.tint.rgb * s.a, params.tint.a), s.a);
   let sa = s.a;
   if sa == 0.0 {
     return d;

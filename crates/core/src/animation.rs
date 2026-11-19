@@ -23,17 +23,42 @@ pub struct Animation {
   /// Frames per second, 1..=60.
   pub fps: u32,
   pub playback: Playback,
+  /// Onion skin: how many frames before and after the shown one show faintly (0..=12), how
+  /// strongly the nearest ones show, and whether earlier frames are tinted red and later green.
+  pub onion_frames: u32,
+  pub onion_opacity: f32,
+  pub onion_colors: bool,
+  /// The first frame is a background under every frame, and the last a foreground over every
+  /// one; neither plays as a frame of its own.
+  pub background: bool,
+  pub foreground: bool,
 }
+
+/// The longest hold duration, in frames.
+pub const MAX_HOLD: u32 = 60;
+/// Onion skin tints: earlier frames, later frames.
+pub const ONION_BEFORE: [u8; 3] = [230, 60, 60];
+pub const ONION_AFTER: [u8; 3] = [40, 170, 90];
 
 impl Default for Animation {
   fn default() -> Self {
-    Self { enabled: false, fps: 12, playback: Playback::Loop }
+    Self {
+      enabled: false,
+      fps: 12,
+      playback: Playback::Loop,
+      onion_frames: 1,
+      onion_opacity: 0.4,
+      onion_colors: true,
+      background: false,
+      foreground: false,
+    }
   }
 }
 
 impl Animation {
   pub(crate) fn sanitized(self) -> Self {
-    Self { fps: self.fps.clamp(1, 60), ..self }
+    let opacity = if self.onion_opacity.is_finite() { self.onion_opacity.clamp(0.0, 1.0) } else { 0.4 };
+    Self { fps: self.fps.clamp(1, 60), onion_frames: self.onion_frames.min(12), onion_opacity: opacity, ..self }
   }
 
   /// Which of `count` frames shows `step` frames after the first, and whether playback is over
@@ -56,6 +81,55 @@ impl Document {
   /// The frames: layer indices of the top-level layers and groups, bottom (first frame) to top.
   pub fn frames(&self) -> Vec<usize> {
     (0..self.layers.len()).filter(|&i| self.layers[i].parent.is_none()).collect()
+  }
+
+  /// The background and foreground frames (layer indices), when they are on.
+  fn fixed_frames(&self) -> (Option<usize>, Option<usize>) {
+    let frames = self.frames();
+    let background = frames.first().copied().filter(|_| self.animation.background && frames.len() > 1);
+    let foreground = frames.last().copied().filter(|_| self.animation.foreground && frames.len() > 1 + usize::from(background.is_some()));
+    (background, foreground)
+  }
+
+  /// The frames that play, in order: all but the background and foreground ones.
+  pub fn animated_frames(&self) -> Vec<usize> {
+    let (background, foreground) = self.fixed_frames();
+    self.frames().into_iter().filter(|&i| Some(i) != background && Some(i) != foreground).collect()
+  }
+
+  /// Whether frame `index` is the background (`Some(false)`) or the foreground (`Some(true)`).
+  pub fn fixed_frame(&self, index: usize) -> Option<bool> {
+    match self.fixed_frames() {
+      (Some(b), _) if b == index => Some(false),
+      (_, Some(f)) if f == index => Some(true),
+      _ => None,
+    }
+  }
+
+  /// What plays, one entry per step: every animated frame, repeated for its hold duration.
+  pub fn playback_sequence(&self) -> Vec<usize> {
+    self.animated_frames().into_iter().flat_map(|i| std::iter::repeat_n(i, 1 + self.layers[i].hold.min(MAX_HOLD) as usize)).collect()
+  }
+
+  /// Onion skin for frame `index` on screen: its opacity, and its tint if colored. Only while
+  /// not playing, for animated frames near the shown one.
+  pub fn onion(&self, index: usize) -> Option<(f32, Option<[u8; 3]>)> {
+    let a = &self.animation;
+    if !a.enabled || self.playing.is_some() || a.onion_frames == 0 || self.layers[index].parent.is_some() || self.layers[index].hidden {
+      return None;
+    }
+    let frames = self.animated_frames();
+    let (Some(at), Some(here)) = (frames.iter().position(|&i| i == index), frames.iter().position(|&i| i == self.shown_frame())) else {
+      return None;
+    };
+    let distance = at.abs_diff(here) as u32;
+    if distance == 0 || distance > a.onion_frames {
+      return None;
+    }
+    // The nearest at full onion opacity, fading to a third of it at the farthest.
+    let fade = 1.0 - (distance - 1) as f32 / a.onion_frames as f32 * 0.67;
+    let tint = a.onion_colors.then_some(if at < here { ONION_BEFORE } else { ONION_AFTER });
+    Some((a.onion_opacity * fade, tint))
   }
 
   /// The frame (top-level layer index) that layer `index` belongs to.
@@ -102,9 +176,11 @@ impl Document {
     if layer.parent.is_some() {
       return false;
     }
+    // Background and foreground frames show under and over every frame.
+    let fixed = (frame.is_some() || self.animation.enabled) && self.fixed_frame(index).is_some();
     match frame {
-      Some(frame) => frame != index,
-      None => self.animation.enabled && self.shown_frame() != index,
+      Some(frame) => frame != index && !fixed,
+      None => self.animation.enabled && self.shown_frame() != index && !fixed,
     }
   }
 
@@ -179,12 +255,29 @@ mod tests {
     let (w, h, pixels) = doc.frame_thumbnail(1, 4);
     assert_eq!((w, h, pixels.len()), (4, 4, 64));
 
-    // Saved and opened, the settings stay.
+    // Hold, background and foreground; onion skin around the shown frame.
+    doc.animation.onion_frames = 1;
+    doc.set_playing(None);
+    doc.select(1);
+    assert!(doc.onion(0).is_some_and(|(_, tint)| tint == Some(ONION_BEFORE)));
+    assert!(doc.onion(3).is_some_and(|(_, tint)| tint == Some(ONION_AFTER)));
+    assert_eq!(doc.onion(1), None, "not the shown frame");
+    doc.layer_mut(1).unwrap().hold = 2;
+    assert_eq!(doc.playback_sequence(), vec![0, 1, 1, 1, 3]);
+    doc.animation.background = true;
+    assert_eq!(doc.playback_sequence(), vec![1, 1, 1, 3]);
+    assert_eq!(doc.fixed_frame(0), Some(false));
+    let with_background = doc.composite_tile(0, 0).unwrap();
+    assert!(with_background[3] == 255 && with_background[7] == 255, "the background shows under frame 2");
+    assert_eq!(doc.onion(0), None, "the background is no onion skin");
+
+    // Saved and opened, the settings and holds stay.
     doc.animation.fps = 24;
     let path = std::env::temp_dir().join(format!("rustcreate-anim-{}.rcreate", std::process::id()));
     doc.save(&path).unwrap();
     let opened = Document::open(&path).unwrap();
     std::fs::remove_file(&path).ok();
     assert_eq!(opened.animation, doc.animation);
+    assert_eq!(opened.layers()[1].hold, 2);
   }
 }

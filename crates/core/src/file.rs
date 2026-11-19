@@ -59,6 +59,10 @@ struct Manifest {
   animation: crate::Animation,
 }
 
+fn is_zero(n: &u32) -> bool {
+  *n == 0
+}
+
 #[derive(Serialize, Deserialize)]
 struct LayerInfo {
   /// Added after format 1 shipped: older files lack them.
@@ -78,6 +82,9 @@ struct LayerInfo {
   /// still shows the same picture.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   text: Option<Text>,
+  /// Animation Assist hold duration.
+  #[serde(default, skip_serializing_if = "is_zero")]
+  hold: u32,
   id: u64,
   name: String,
   opacity: f32,
@@ -119,6 +126,7 @@ impl Document {
           group: l.group,
           parent: l.parent,
           text: l.text.as_deref().cloned(),
+          hold: l.hold,
           id: l.id,
           name: l.name.clone(),
           opacity: l.opacity,
@@ -187,6 +195,7 @@ impl Document {
       (layer.alpha_lock, layer.clip) = (info.alpha_lock, info.clip);
       layer.blend = info.blend;
       layer.text = info.text.filter(|_| !info.group).map(Box::new);
+      layer.hold = info.hold.min(crate::animation::MAX_HOLD);
       if !layer.group {
         let mut png = Vec::new();
         zip.by_name(&format!("layers/{}.png", info.id))?.read_to_end(&mut png)?;

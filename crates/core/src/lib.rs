@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub use adjust::{Adjust, Adjustment, curve};
-pub use animation::{Animation, Playback};
+pub use animation::{Animation, MAX_HOLD, ONION_AFTER, ONION_BEFORE, Playback};
 pub use brush::{Brush, Stroke};
 pub use file::{FORMAT, FileError};
 pub use fill::{Gradient, GradientKind};
@@ -130,6 +130,8 @@ pub struct Layer {
   /// A text layer: its pixels are this text, drawn by `Document::set_text`. Any other edit of
   /// its pixels turns it into a plain layer (Photoshop's Rasterize).
   pub(crate) text: Option<Box<Text>>,
+  /// Animation Assist: how many more frames a frame stays on screen (Hold duration).
+  pub hold: u32,
   /// Only tiles that were painted exist; a missing tile is fully transparent.
   tiles: HashMap<(u32, u32), Tile>,
   /// Tiles written through `tile_mut` since the renderer last looked (see `take_dirty`).
@@ -151,6 +153,7 @@ impl Layer {
       group: false,
       parent: None,
       text: None,
+      hold: 0,
       tiles: HashMap::new(),
       dirty: HashSet::new(),
     }

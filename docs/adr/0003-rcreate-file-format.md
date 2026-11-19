@@ -13,6 +13,9 @@ A group has `group: true` and no `layers/{id}.png`; a layer in a group names it 
 Children sit right below their group in the list; files where they do not are rejected.
 A text layer also has `text` (`text`, `font`, `size`, `color`, `position`); its pixels are still
 in `layers/{id}.png`, so it looks the same where the font is missing.
+Animation Assist adds an optional `animation` object to `document.json` (enabled, fps, playback,
+onion skin, background/foreground) and an optional `hold` to a frame's layer
+([ADR 0007](0007-animation-frames-are-layers.md)).
 
 ## Decision
 

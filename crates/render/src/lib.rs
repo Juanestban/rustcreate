@@ -193,16 +193,24 @@ impl CanvasRenderer {
     let live: Vec<u64> = doc.layers().iter().flat_map(|l| [Some(l.id), l.mask.as_ref().map(|m| m.id)]).flatten().collect();
     self.layers.retain(|id, _| live.contains(id));
 
-    // Hidden as the document says: Animation Assist leaves out every frame but the one shown.
-    let hidden: Vec<bool> = (0..doc.layers().len()).map(|i| doc.hides(i)).collect();
+    // Hidden as the document says (Animation Assist leaves out every frame but the one shown),
+    // except frames shown faintly as onion skin, on screen only.
+    let looks: Vec<Look> = (0..doc.layers().len())
+      .map(|i| match doc.onion(i) {
+        Some((opacity, tint)) => {
+          Look { hidden: false, opacity, tint: tint.map_or([0.0; 4], |[r, g, b]| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 0.85]) }
+        }
+        None => Look { hidden: doc.hides(i), opacity: 1.0, tint: [0.0; 4] },
+      })
+      .collect();
     let composed: Vec<_> = doc
       .layers()
       .iter()
-      .zip(&hidden)
-      .map(|(l, &hidden)| (l.id, l.opacity.to_bits(), hidden, l.blend, l.clip, l.mask.as_ref().map(|m| m.id), l.parent()))
+      .zip(&looks)
+      .map(|(l, &look)| (l.id, l.opacity.to_bits(), look, l.blend, l.clip, l.mask.as_ref().map(|m| m.id), l.parent()))
       .collect();
     if changed || composed != self.composed || std::mem::take(&mut self.float_moved) {
-      self.composite(device, queue, doc.layers(), &hidden);
+      self.composite(device, queue, doc.layers(), &looks);
       self.composed = composed;
     }
   }
@@ -271,7 +279,9 @@ impl CanvasRenderer {
     }
   }
 
-  fn composite(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, layers: &[Layer], hidden: &[bool]) {
+  fn composite(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, layers: &[Layer], looks: &[Look]) {
+    let hidden: Vec<bool> = looks.iter().map(|l| l.hidden).collect();
+    let hidden = &hidden[..];
     let mut steps = Vec::new();
     plan(layers, hidden, None, 0..layers.len(), 0, &mut steps);
     // Targets for every depth the plan reaches.
@@ -323,8 +333,11 @@ impl CanvasRenderer {
             Source::Base(depth) => &self.bases[depth].1,
           };
           let gpu = &self.layers[&layer.id];
-          let mut params = [0u8; 16];
-          params[..4].copy_from_slice(&layer.opacity.clamp(0.0, 1.0).to_ne_bytes());
+          let mut params = [0u8; 32];
+          params[..4].copy_from_slice(&(layer.opacity.clamp(0.0, 1.0) * looks[index].opacity).to_ne_bytes());
+          for (n, v) in looks[index].tint.iter().enumerate() {
+            params[16 + n * 4..20 + n * 4].copy_from_slice(&v.to_ne_bytes());
+          }
           params[4..8].copy_from_slice(&(layer.blend as u32).to_ne_bytes());
           params[8..12].copy_from_slice(&u32::from(clipped).to_ne_bytes());
           params[12..16].copy_from_slice(&u32::from(layer.mask.is_some()).to_ne_bytes());
@@ -397,7 +410,16 @@ impl CanvasRenderer {
 }
 
 /// One layer's part in a composite: (id, opacity bits, hidden, blend, clip, mask id, group).
-type Composed = (u64, u32, bool, BlendMode, bool, Option<u64>, Option<u64>);
+type Composed = (u64, u32, Look, BlendMode, bool, Option<u64>, Option<u64>);
+
+/// How a layer is drawn on screen: left out, or faded and tinted (onion skin).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Look {
+  hidden: bool,
+  opacity: f32,
+  /// RGB and how much of it, 0 = none.
+  tint: [f32; 4],
+}
 
 /// Where a composite pass reads a layer's pixels from.
 #[derive(Clone, Copy)]
@@ -489,7 +511,7 @@ fn layer_texture(device: &wgpu::Device, (width, height): (u32, u32)) -> LayerTex
   let view = texture.create_view(&Default::default());
   let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
     label: Some("layer params"),
-    contents: &[0; 16],
+    contents: &[0; 32],
     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
   });
   LayerTexture { texture, view, params, uploaded: HashMap::new() }

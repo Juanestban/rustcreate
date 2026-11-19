@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use eframe::egui::{self, Align, Frame, Layout, Margin, RichText, Sense, Stroke, Vec2, vec2};
-use rustcreate_core::Playback;
+use rustcreate_core::{MAX_HOLD, Playback};
 
 use super::icons::{self, Icon};
 use super::theme;
@@ -19,6 +19,7 @@ pub type Thumbnails = HashMap<u64, (u64, f64, egui::TextureHandle)>;
 enum FrameAction {
   Duplicate(usize),
   Delete(usize),
+  Hold(usize, u32),
 }
 
 impl App {
@@ -30,7 +31,12 @@ impl App {
   /// Moves playback on to the frame due now, and asks for the next repaint in time.
   fn advance_playback(&mut self, ctx: &egui::Context) {
     let Some(start) = self.playing else { return };
-    let frames = self.doc.frames();
+    // Each frame once per step of its hold; no background or foreground frame.
+    let frames = self.doc.playback_sequence();
+    if frames.is_empty() {
+      self.stop_playback();
+      return;
+    }
     let animation = self.doc.animation;
     let step = ((ctx.input(|i| i.time) - start) * animation.fps as f64) as u64;
     let (at, done) = animation.frame_at(step, frames.len());
@@ -64,18 +70,41 @@ impl App {
         ui.horizontal(|ui| {
           // Controls: play/pause, speed and how it plays.
           ui.vertical(|ui| {
-            ui.set_width(120.0);
-            let playing = self.playing.is_some();
-            let tip = self.i18n.tr(if playing { "ui-animation-pause" } else { "ui-animation-play" });
-            if icons::button(ui, if playing { Icon::Pause } else { Icon::Play }, playing, true, &tip).clicked() {
-              if playing {
-                self.stop_playback();
-              } else {
-                self.canvas.end_text(&mut self.doc);
-                self.canvas.end_transform(&mut self.doc, true);
-                self.playing = Some(ctx.input(|i| i.time));
+            ui.set_width(130.0);
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.horizontal(|ui| {
+              let playing = self.playing.is_some();
+              let tip = self.i18n.tr(if playing { "ui-animation-pause" } else { "ui-animation-play" });
+              if icons::button(ui, if playing { Icon::Pause } else { Icon::Play }, playing, true, &tip).clicked() {
+                if playing {
+                  self.stop_playback();
+                } else {
+                  self.canvas.end_text(&mut self.doc);
+                  self.canvas.end_transform(&mut self.doc, true);
+                  self.playing = Some(ctx.input(|i| i.time));
+                }
               }
-            }
+              // Onion skin and the background/foreground frames.
+              ui.menu_button(self.i18n.tr("ui-animation-settings"), |ui| {
+                let animation = &mut self.doc.animation;
+                ui.label(RichText::new(self.i18n.tr("ui-animation-onion")).strong());
+                ui.add(egui::Slider::new(&mut animation.onion_frames, 0..=12).text(self.i18n.tr("ui-animation-onion-frames")));
+                let mut opacity = animation.onion_opacity * 100.0;
+                if ui
+                  .add(egui::Slider::new(&mut opacity, 0.0..=100.0).suffix(" %").fixed_decimals(0).text(self.i18n.tr("ui-animation-onion-opacity")))
+                  .changed()
+                {
+                  animation.onion_opacity = opacity / 100.0;
+                }
+                ui.checkbox(&mut animation.onion_colors, self.i18n.tr("ui-animation-onion-colors"))
+                  .on_hover_text(self.i18n.tr("ui-animation-onion-colors-help"));
+                ui.separator();
+                ui.checkbox(&mut animation.background, self.i18n.tr("ui-animation-background"))
+                  .on_hover_text(self.i18n.tr("ui-animation-background-help"));
+                ui.checkbox(&mut animation.foreground, self.i18n.tr("ui-animation-foreground"))
+                  .on_hover_text(self.i18n.tr("ui-animation-foreground-help"));
+              });
+            });
             let animation = &mut self.doc.animation;
             ui.add(egui::DragValue::new(&mut animation.fps).range(1..=60).suffix(" fps"));
             let modes =
@@ -113,10 +142,18 @@ impl App {
                 };
                 ui.painter().rect_stroke(picture, 6, edge, egui::StrokeKind::Outside);
                 let color = if active { theme::ACCENT } else { palette.muted };
+                // The background and foreground frames are named; others numbered, with their hold.
+                let hold = self.doc.layers()[index].hold;
+                let label = match self.doc.fixed_frame(index) {
+                  Some(false) => self.i18n.tr("ui-animation-background"),
+                  Some(true) => self.i18n.tr("ui-animation-foreground"),
+                  None if hold > 0 => format!("{}  +{hold}", n + 1),
+                  None => format!("{}", n + 1),
+                };
                 ui.painter().text(
                   egui::pos2(rect.center().x, rect.bottom() - 9.0),
                   egui::Align2::CENTER_CENTER,
-                  format!("{}", n + 1),
+                  label,
                   egui::FontId::proportional(13.0),
                   color,
                 );
@@ -126,6 +163,18 @@ impl App {
                   self.doc.select(index);
                 }
                 response.context_menu(|ui| {
+                  // Hold duration: the frame stays this many frames longer.
+                  ui.horizontal(|ui| {
+                    ui.label(self.i18n.tr("ui-animation-hold"));
+                    if ui.add_enabled(hold > 0, egui::Button::new("−")).clicked() {
+                      action = Some(FrameAction::Hold(index, hold - 1));
+                    }
+                    ui.label(format!("{hold}"));
+                    if ui.add_enabled(hold < MAX_HOLD, egui::Button::new("+")).clicked() {
+                      action = Some(FrameAction::Hold(index, hold + 1));
+                    }
+                  });
+                  ui.separator();
                   if ui.button(self.i18n.tr("ui-layer-duplicate")).clicked() {
                     action = Some(FrameAction::Duplicate(index));
                     ui.close();
@@ -156,6 +205,10 @@ impl App {
       }
       Some(FrameAction::Delete(i)) => {
         self.doc.delete_layer(i);
+      }
+      Some(FrameAction::Hold(i, hold)) => {
+        self.doc.checkpoint();
+        self.doc.layer_mut(i).expect("frame").hold = hold;
       }
       None => {}
     }

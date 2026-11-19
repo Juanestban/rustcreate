@@ -43,8 +43,10 @@
   **Phase 3 is done.**
 - **Animation step 1 (2026-11-19):** Animation Assist in Actions; frames are top-level layers
   and groups (ADR 0007); a timeline under the canvas with thumbnails and playback.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 4 step 2: onion skin, hold
-  frames, background/foreground frames.
+- **Animation step 2 (2026-11-19):** onion skin drawn by the GPU (per-layer fade and tint),
+  hold duration (`Layer.hold`), background/foreground frames that never play on their own.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 4 step 3: export GIF, animated
+  PNG and PNG sequence.
 
 ## Phase 0 — Foundation
 
@@ -196,7 +198,8 @@ time-lapse recording.
 - [x] Animation Assist: timeline of frames (one top-level layer or group per frame) with
       thumbnails, add/duplicate/delete frames, only the shown frame on the canvas
       ([ADR 0007](adr/0007-animation-frames-are-layers.md))
-- [ ] Onion skin (frames, opacity, colors), hold frames, background/foreground frames
+- [x] Onion skin (0–12 frames each side, opacity fading with distance, earlier red and later
+      green; on screen only), hold duration per frame, background and foreground frames
 - [x] Playback: loop, ping-pong, one-shot; 1–60 frames per second; a press on the canvas stops it
 - [ ] Export GIF, MP4, animated PNG, PNG sequence
 
