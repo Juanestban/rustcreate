@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.5.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Juanestban/rustcreate"
@@ -12,12 +12,20 @@ keywords = ["procreate", "graphics", "draw", "art-design"]
 [workspace.dependencies]
 rustcreate-core = { path = "crates/core" }
 rustcreate-render = { path = "crates/render" }
-eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "wayland", "x11"] }
+eframe = { version = "0.37", default-features = false, features = [
+  "wgpu",
+  "default_fonts",
+  "accesskit",
+  "wayland",
+  "x11",
+] }
 fluent-bundle = "0.16"
 png = "0.18"
 pollster = "0.4"
 raw-window-handle = "0.6"
-reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "native-tls",
+] }
 resvg = "0.45"
 rfd = "0.18"
 serde = { version = "1", features = ["derive"] }
@@ -26,14 +34,28 @@ sha2 = "0.10"
 sys-locale = "0.3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt", "time"] }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Controls", "Win32_UI_Input_Pointer", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_Controls",
+  "Win32_UI_Input_Pointer",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
 unic-langid = "0.9"
 # Same major as eframe's; DX12 first, Vulkan as fallback (DESIGN), Metal for macOS later.
-wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "dx12", "vulkan", "metal"] }
+wgpu = { version = "30", default-features = false, features = [
+  "std",
+  "wgsl",
+  "dx12",
+  "vulkan",
+  "metal",
+] }
 winresource = "0.1"
 # `.rcreate` writes only `Stored` entries (ADR 0003); deflate is for reading imported
 # `.brushset` files (pure Rust zlib-rs, already used by `png`).
-zip = { version = "9.7", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "9.7", default-features = false, features = [
+  "deflate-flate2-zlib-rs",
+] }
 
 # Debug builds with optimized dependencies: egui and wgpu run about as fast as in release.
 [profile.dev.package."*"]
