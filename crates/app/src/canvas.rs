@@ -219,6 +219,14 @@ impl Canvas {
   /// Draws the canvas filling `ui`, after handling painting, view gestures and shortcuts.
   /// `keys` is false while a text field has the keyboard.
   pub fn show(&mut self, ui: &mut egui::Ui, render_state: &egui_wgpu::RenderState, doc: &mut Document, keys: bool, i18n: &crate::i18n::I18n) {
+    // Crop, Canvas Size, Image Size (or undoing one) changed the size: a renderer of the new
+    // size, and the view fitted to it.
+    let size = (doc.width, doc.height);
+    if render_state.renderer.read().callback_resources.get::<CanvasRenderer>().is_some_and(|r| r.size() != size) {
+      let renderer = CanvasRenderer::new(&render_state.device, render_state.target_format, size);
+      render_state.renderer.write().callback_resources.insert(renderer);
+      self.view = None;
+    }
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
     let canvas = vec2(doc.width as f32, doc.height as f32);
     let view = self.view.get_or_insert_with(|| View::fit(rect.size(), canvas));

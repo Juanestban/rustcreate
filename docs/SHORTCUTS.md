@@ -22,7 +22,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Shift` / `Alt` + selection drag | Add to / subtract from the selection | ✅ |
 | `V` | Move | 🕓 |
 | `T` | Text | 🕓 |
-| `C` | Crop | 🕓 |
+| `C` | Crop tool (drag a frame; for now: Actions → Crop to selection) | 🕓 |
 
 ## Brush
 
@@ -59,6 +59,8 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Ctrl+I` | Invert | ✅ |
 | `Ctrl+Shift+U` | Desaturate | ✅ |
 | `Enter` / `Esc` | Apply / cancel the open adjustment | ✅ |
+| `Ctrl+Alt+C` | Canvas Size | ✅ |
+| `Ctrl+Alt+I` | Image Size | ✅ |
 
 ## Layers
 

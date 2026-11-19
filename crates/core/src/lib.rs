@@ -8,6 +8,7 @@ mod fill;
 mod guide;
 mod history;
 mod import;
+mod resize;
 mod selection;
 mod shape;
 mod swatches;
@@ -252,7 +253,7 @@ impl Document {
   /// changing a layer property through [`Document::layer_mut`]; the layer operations below
   /// call it themselves.
   pub fn checkpoint(&mut self) {
-    self.history.push(Snapshot::new(self.layers.clone(), self.active, self.selection.clone()));
+    self.history.push(Snapshot::new(self.layers.clone(), self.active, self.selection.clone(), (self.width, self.height)));
     self.revision += 1;
   }
 
@@ -284,12 +285,13 @@ impl Document {
       self.layers = state.layers;
       self.active = state.active;
       self.selection = state.selection;
+      (self.width, self.height) = state.size;
       self.revision = self.revision.saturating_sub(1);
     }
   }
 
   fn restore(&mut self, step: impl FnOnce(&mut History, Snapshot) -> Result<Snapshot, Snapshot>) -> bool {
-    let current = Snapshot::new(std::mem::take(&mut self.layers), self.active, self.selection.take());
+    let current = Snapshot::new(std::mem::take(&mut self.layers), self.active, self.selection.take(), (self.width, self.height));
     let (state, moved) = match step(&mut self.history, current) {
       Ok(state) => (state, true),
       Err(current) => (current, false),
@@ -297,6 +299,7 @@ impl Document {
     self.layers = state.layers;
     self.active = state.active;
     self.selection = state.selection;
+    (self.width, self.height) = state.size;
     self.revision += u64::from(moved);
     moved
   }

@@ -4,5 +4,6 @@ pub mod adjust;
 pub mod chrome;
 pub mod color;
 pub mod icons;
+pub mod resize;
 pub mod studio;
 pub mod theme;

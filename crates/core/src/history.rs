@@ -17,13 +17,15 @@ pub(crate) struct Snapshot {
   // shortcut: the selection mask is not counted in `bytes`; it is one byte per pixel at most
   // per step, count it if long selection sessions hit the memory cap.
   pub selection: Option<Selection>,
+  /// The canvas size then: Crop, Canvas Size and Image Size change it.
+  pub size: (u32, u32),
   /// Bytes of tiles only this snapshot holds, measured once the step is done.
   bytes: usize,
 }
 
 impl Snapshot {
-  pub fn new(layers: Vec<Layer>, active: usize, selection: Option<Selection>) -> Self {
-    Self { layers, active, selection, bytes: 0 }
+  pub fn new(layers: Vec<Layer>, active: usize, selection: Option<Selection>, size: (u32, u32)) -> Self {
+    Self { layers, active, selection, size, bytes: 0 }
   }
 
   // shortcut: counts tiles nothing else references when measured; a tile later freed by an

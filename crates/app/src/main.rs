@@ -120,6 +120,8 @@ pub(crate) struct App {
   title: String,
   /// An adjustment dialog, previewing on the canvas.
   adjusting: Option<ui::adjust::Adjusting>,
+  /// The Canvas Size or Image Size dialog.
+  resize: Option<ui::resize::ResizeDialog>,
 }
 
 /// Common canvas sizes for the "New canvas" dialog, with their name tokens.
@@ -173,6 +175,7 @@ impl App {
       settings,
       new_canvas: None,
       adjusting: None,
+      resize: None,
       error: None,
       closing: false,
       title: String::new(),
@@ -288,13 +291,20 @@ impl App {
 
   /// File and interface shortcuts (docs/SHORTCUTS.md). The longer combinations go first.
   fn shortcuts(&mut self, ctx: &egui::Context) {
-    if ctx.egui_wants_keyboard_input() || self.confirm.is_some() || self.new_canvas.is_some() || self.adjusting.is_some() {
+    if ctx.egui_wants_keyboard_input() || self.confirm.is_some() || self.new_canvas.is_some() || self.adjusting.is_some() || self.resize.is_some() {
       return;
     }
     let (m, shift, alt) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT, egui::Modifiers::ALT);
     let key = |modifiers, key| ctx.input_mut(|i| i.consume_key(modifiers, key));
     if key(m | alt | shift, egui::Key::W) {
       self.export_png();
+    }
+    // Canvas Size and Image Size (Photoshop), before Ctrl+I takes the I.
+    if key(m | alt, egui::Key::C) {
+      self.open_resize(false);
+    }
+    if key(m | alt, egui::Key::I) {
+      self.open_resize(true);
     }
     // Adjustments. Ctrl+Shift+I (invert selection) is the canvas's: Ctrl+I must not take it.
     if key(m | shift, egui::Key::U) {
@@ -441,7 +451,7 @@ impl eframe::App for App {
       self.top_bar(ui);
       self.sidebar(ui);
     }
-    let keys = !ctx.egui_wants_keyboard_input() && self.confirm.is_none() && self.adjusting.is_none();
+    let keys = !ctx.egui_wants_keyboard_input() && self.confirm.is_none() && self.adjusting.is_none() && self.resize.is_none();
     let render_state = self.render_state.clone();
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(ui.visuals().extreme_bg_color)).show(ui, |ui| {
       self.canvas.show(ui, &render_state, &mut self.doc, keys, &self.i18n);
@@ -451,6 +461,7 @@ impl eframe::App for App {
       self.brush_studio(&ctx);
     }
     self.adjust_dialog(&ctx);
+    self.resize_dialog(&ctx);
     self.dialogs(&ctx);
     // Not mid-drag, so a size slider being dragged saves once at the end.
     if !ctx.input(|i| i.pointer.any_down()) {

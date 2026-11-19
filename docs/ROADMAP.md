@@ -19,13 +19,13 @@
   motion filtering, perspective guides, QuickShape editing and arcs, wet
   mixing, pen tilt, ColorDrop threshold, palette import/export, the guide saved in the file,
   Calligraphy/Abstract/Elements brushes, `.rcbrushes` sets and the brush outline. **Phase 2 is
-  done.** Phase 3 started: selections, Free Transform, Alpha Lock, clipping masks, layer masks, adjustments, filters, all 23 blend modes.
+  done.** Phase 3 started: selections, Free Transform, Alpha Lock, clipping masks, layer masks, adjustments, filters, all 23 blend modes, crop and canvas/image size.
 - **Windows start-up fix:** the first Windows install ran with no window. Likely cause: FXC
   (wgpu's DX12 compiler when DXC is not shipped) choking on the composite shader's loop; the
   shader now has no loops. Each start writes `%APPDATA%\rustcreate\rustcreate.log` (steps,
   GPU, panics). Waiting for a retest on Windows.
 - **Not verified yet:** MSI packaging and the `.ico` (`build.rs`) only run on Windows/CI.
-- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 3: Crop, Canvas Size and Image Size next.
+- **Next:** v0.1.0 still waits on a Windows test with a pen. Phase 3: layer groups next.
 
 ## Phase 0 — Foundation
 
@@ -153,7 +153,8 @@ The Photoshop features people use most, in this order:
 - [x] The remaining blend modes: Linear Burn, Subtract, Divide, Soft/Hard/Vivid/Linear/Pin
       Light, Difference, Exclusion, Hue, Saturation, Color, Luminosity (23 in all, CPU and GPU,
       grouped as in Photoshop)
-- [ ] Crop, Canvas Size and Image Size
+- [x] Crop to selection, Canvas Size (with anchor) and Image Size (resampled, averaging when
+      shrinking): layers, masks and the selection; undo restores the old size
 - [ ] Layer groups with their own blend mode and opacity
 - [ ] Text layers
 - [ ] PSD import/export, JPEG/WebP export

@@ -249,6 +249,19 @@ impl App {
       self.export_png();
     }
     ui.separator();
+    if ui
+      .add_enabled(self.doc.selection().is_some(), egui::Button::new(self.i18n.tr("ui-canvas-crop")).min_size(vec2(ui.available_width(), 30.0)))
+      .clicked()
+    {
+      self.crop();
+    }
+    if wide(ui, self.i18n.tr("ui-canvas-size"), "Ctrl+Alt+C") {
+      self.open_resize(false);
+    }
+    if wide(ui, self.i18n.tr("ui-image-size"), "Ctrl+Alt+I") {
+      self.open_resize(true);
+    }
+    ui.separator();
     self.guides_section(ui);
     ui.separator();
     // Settings: applied and saved as soon as they change.

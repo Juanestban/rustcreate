@@ -235,6 +235,11 @@ impl CanvasRenderer {
     pass.draw(0..4, 0..1);
   }
 
+  /// The canvas size it draws, in pixels.
+  pub fn size(&self) -> (u32, u32) {
+    self.size
+  }
+
   /// The finished composite, for tests and future readback (export of what is on screen).
   pub fn composite_texture(&self) -> &wgpu::Texture {
     &self.stack[self.result].0
