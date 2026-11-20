@@ -3271,7 +3271,7 @@ dependencies = [
 
 [[package]]
 name = "rustcreate"
-version = "1.1.0"
+version = "1.2.4"
 dependencies = [
  "eframe",
  "fluent-bundle",
@@ -3295,7 +3295,7 @@ dependencies = [
 
 [[package]]
 name = "rustcreate-core"
-version = "1.1.0"
+version = "1.2.4"
 dependencies = [
  "ab_glyph",
  "bytes",
@@ -3312,7 +3312,7 @@ dependencies = [
 
 [[package]]
 name = "rustcreate-render"
-version = "1.1.0"
+version = "1.2.4"
 dependencies = [
  "pollster 0.4.0",
  "rustcreate-core",
