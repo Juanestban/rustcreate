@@ -23,7 +23,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Shift` / `Alt` + selection drag | Add to / subtract from the selection | ✅ |
 | `V` | Move | 🕓 |
 | `T` | Text (click to add, click a text to edit, drag to move; Ctrl+Enter or Esc finishes) | ✅ |
-| `C` | Crop tool (drag a frame; for now: Actions → Crop to selection) | 🕓 |
+| `C` | Crop tool (drag a frame; for now: Image → Crop to selection) | 🕓 |
 
 ## Brush
 
@@ -85,6 +85,7 @@ becomes `Option`. Status: ✅ in v0.1 · 🕓 planned (see [ROADMAP.md](ROADMAP.
 | `Ctrl+0` | Fit to screen | ✅ |
 | `Ctrl+1` | Actual pixels (100 %) | ✅ |
 | `Tab` | Hide / show the interface | ✅ |
+| `Ctrl+K` | Settings (preferences, About, check for updates) | ✅ |
 | `F` | Cycle screen modes (full screen) | 🕓 |
 
 ## File

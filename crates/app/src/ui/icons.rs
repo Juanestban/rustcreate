@@ -9,9 +9,6 @@ use super::theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
-  Gallery,
-  Actions,
-  Adjustments,
   Selection,
   Transform,
   Brush,
@@ -50,24 +47,6 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
   };
 
   match icon {
-    Icon::Gallery => {
-      for (x, y) in [(4.0, 4.0), (13.0, 4.0), (4.0, 13.0), (13.0, 13.0)] {
-        rounded((x, y), (x + 7.0, y + 7.0), 2.0);
-      }
-    }
-    Icon::Actions => {
-      // A wrench: open ring head and a handle.
-      line(arc(at(15.5, 8.5), 4.5 * s, PI * 0.75, PI * 2.25));
-      seg((12.3, 11.7), (4.5, 19.5));
-      seg((6.0, 21.0), (13.7, 13.3));
-    }
-    Icon::Adjustments => {
-      // A wand with a spark.
-      seg((4.0, 20.0), (15.0, 9.0));
-      for (a, b) in [((18.0, 3.0), (18.0, 7.0)), ((16.0, 5.0), (20.0, 5.0)), ((20.5, 10.5), (20.5, 12.5)), ((19.5, 11.5), (21.5, 11.5))] {
-        seg(a, b);
-      }
-    }
     Icon::Selection => {
       // A dashed lasso loop.
       let points = arc(at(12.0, 10.5), 7.5 * s, 0.0, TAU);

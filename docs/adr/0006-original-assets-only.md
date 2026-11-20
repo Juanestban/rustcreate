@@ -14,8 +14,8 @@ artwork are protected. Shipping any of them would put the project at risk of tak
   and states we are not affiliated.
 - **No copied assets**: icons, brush shapes and grains, textures, sounds and fonts are original
   or come with a license that allows redistribution (credited in `NOTICE.md`).
-- The interface follows Procreate's *layout and workflow* (top bar, side size/opacity sliders,
-  floating layers panel), drawn with our own minimalist icon set.
+- The interface follows Photoshop's *layout* (menu bar, toolbar, docked windows; ADR 0008) and
+  Procreate's *workflow*, drawn with our own minimalist icon set.
 - Brushes reproduce the *categories and behavior* (spacing, jitter, taper, pressure curves) with
   our own parameters and textures. Importing users' own `.brushset` / `.abr` files comes later.
 - Keyboard shortcuts follow Photoshop's conventions; shortcuts are not copyrightable.

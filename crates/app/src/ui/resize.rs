@@ -31,7 +31,6 @@ impl App {
   fn settle(&mut self) {
     self.canvas.end_transform(&mut self.doc, true);
     self.adjusting = None;
-    self.popover = None;
   }
 
   pub(crate) fn resize_dialog(&mut self, ctx: &egui::Context) {

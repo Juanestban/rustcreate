@@ -53,6 +53,10 @@
 - **Tabs (2026-11-19):** `tabs.rs`; the shown document stays in `App`'s fields, the others
   wait in `App::tabs`. 16 bits per channel moved to "Technical debt". **Phase 5 is done.**
 - **Wintab (2026-11-19):** `pen.rs` `wintab` module (ADR 0004). Not tested on a tablet yet.
+- **Photoshop-like interface (2026-11-19):** menu bar, left toolbar, right dock
+  (`chrome.rs`), layer drag and drop into and out of groups (`Document::drop_layer`), Settings window
+  (`ui/preferences.rs`, `Updates::check_now`), and the rename, outline and brushes-window fixes.
+  The floating panels (`Popover`) are gone.
 - **Next:** v0.1.0 still waits on a Windows test with a pen (Windows Ink and Wintab). Phase 6:
   macOS (unsigned universal `.app`).
 
@@ -228,9 +232,27 @@ color management (Display P3, ICC), TIFF export, reference window, time-lapse re
       untitled canvas is replaced; each tab keeps its view), File > Save all, Ctrl+Tab, quitting
       asks about every unsaved tab
 
+## Phase 5b — Photoshop-like interface (from using the app)
+
+- [x] Menu bar (File, Edit, Image, Layer, Select, Filter, View, Window, Help) instead of the top
+      bar and its floating panels (ADR 0008)
+- [x] Tools on the left; a resizable dock on the right with folding windows: tool options,
+      color, brushes, layers (with opacity); the Window menu shows or hides them
+- [x] Layers move by drag and drop (one undo step; a group moves with its content); dropped on a
+      group's row a layer goes inside it, dropped on another row it takes that row's group
+- [x] Groups are visible in the layers panel: tinted, outlined row with the number of layers it
+      holds; its layers indented behind an accent line
+- [x] Settings window: preferences, About (version, authors, license, repository), check for
+      updates on demand; from Edit, `Ctrl+K`, the menu bar and the home screen
+- [x] Fixes: Enter now saves a layer's new name (the field kept the focus forever); the brush
+      outline sits where a soft tip covers half (it looked bigger than the mark), with a faint
+      ring at its full reach; the brushes window follows the dock's width instead of
+      overflowing when the window is maximized; the Palettes tab no longer widens the dock on
+      every mouse move (its row was wider than the dock)
+
 ## Phase 6 — More platforms
 
-- [x] Wintab pen input (older tablets): opt-in in Actions, `wintab32.dll` loaded at run time;
+- [x] Wintab pen input (older tablets): opt-in in Settings, `wintab32.dll` loaded at run time;
       pressure, tilt, eraser end, barrel button (not tested on a tablet yet)
 - [ ] macOS (Metal), Apple Pencil on iPad/iPhone
 - [ ] Android (Vulkan, stylus)

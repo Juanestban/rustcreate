@@ -37,14 +37,10 @@ fn same_kind(a: &Adjustment, b: &Adjustment) -> bool {
 }
 
 impl App {
-  pub(crate) fn adjust_menu(&mut self, ui: &mut egui::Ui) {
-    ui.set_width(220.0);
-    for (i, (id, settings)) in menu().into_iter().enumerate() {
-      // Filters after the color adjustments.
-      if i == 6 {
-        ui.separator();
-      }
-      if ui.add_sized([ui.available_width(), 28.0], egui::Button::new(self.i18n.tr(id))).clicked() {
+  /// Image > Adjustments (the first six of `menu()`) and the Filter menu (the rest).
+  pub(crate) fn adjustments(&mut self, ui: &mut egui::Ui, range: std::ops::Range<usize>) {
+    for (_, (id, settings)) in menu().into_iter().enumerate().filter(|(i, _)| range.contains(i)) {
+      if ui.button(self.i18n.tr(id)).clicked() {
         self.start_adjust(settings);
       }
     }
@@ -54,7 +50,6 @@ impl App {
   pub(crate) fn start_adjust(&mut self, settings: Adjustment) {
     self.canvas.end_transform(&mut self.doc, true);
     self.adjusting = None;
-    self.popover = None;
     if matches!(settings, Adjustment::Invert | Adjustment::Desaturate) {
       self.doc.adjust(&settings);
     } else if let Some(live) = self.doc.begin_adjust() {

@@ -62,9 +62,12 @@ file; do not silently diverge.
 
 ## Interface
 
-- Layout inspired by Procreate: a thin top bar (gallery, actions, adjustments, selection,
-  transform on the left; brush, smudge, eraser, layers and color on the right), vertical size and
-  opacity sliders on the left edge, floating panels for brushes, layers and color.
+- Photoshop's layout ([ADR 0008](adr/0008-photoshop-layout.md)): a menu bar on top (File, Edit, Image, Layer, Select, Filter,
+  View, Window, Help) with the tabs and a Settings button; the tools, the color, the vertical size
+  and opacity sliders and undo/redo on the left; a resizable dock on the right with folding
+  windows (tool options, color, brushes, layers) that the Window menu shows or hides.
+- Settings window (Edit > Settings, `Ctrl+K`, or the home screen's button): preferences, and
+  About with the version, authors, license, repository link and "Check for updates".
 - Dark theme (default) and light theme; follows the system theme unless the user picks one.
 - Our own minimalist SVG icon set: thin rounded strokes, dark surfaces, gradient accents.
 - App icon: no square, dark background with a soft glow, a brush head without handle leaving a

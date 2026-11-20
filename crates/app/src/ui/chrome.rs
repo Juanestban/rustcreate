@@ -1,34 +1,21 @@
-//! The Procreate-like layout: a thin top bar (gallery, actions, adjustments, selection,
-//! transform on the left; brush, smudge, eraser, layers and color on the right), a left sidebar
-//! with the size and opacity sliders, the eyedropper and undo/redo, and the floating panels the
-//! top bar opens.
+//! The Photoshop-like layout: a menu bar on top (File, Edit, Image, Layer, Select, Filter,
+//! View, Window, Help), the tools on the left and the dock of windows on the right (tool options,
+//! color, brushes, layers).
 
-use eframe::egui::{self, Align, Align2, Color32, Frame, Layout, Margin, Pos2, RichText, Sense, Stroke, Vec2, vec2};
+use eframe::egui::{self, Align, Color32, Frame, Layout, Margin, Pos2, RichText, Sense, Stroke, Vec2, vec2};
 use rustcreate_core::BlendMode;
 
 use super::icons::{self, Icon};
+use super::preferences::Page;
 use super::studio;
 use super::theme;
 use crate::canvas::ColorDrop;
 use crate::guides::Kind;
-use crate::i18n::Language;
 use crate::library::{CATEGORIES, MINE, Name};
-use crate::settings::Theme;
+use crate::settings::Panels;
 use crate::tools::{SelectKind, Tool};
 use crate::{App, Export, Pending};
 use rustcreate_core::{GradientKind, Symmetry};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Popover {
-  File,
-  Actions,
-  Brushes,
-  Fill,
-  Layers,
-  Color,
-  Select,
-  Adjust,
-}
 
 /// The layer blend modes in Photoshop's order; a separator goes before each index in
 /// `BLEND_GROUPS` (darken, lighten, contrast, compare, color).
@@ -61,58 +48,31 @@ const BLEND_MODES: [(BlendMode, &str); 23] = [
 const BLEND_GROUPS: [usize; 5] = [1, 5, 9, 15, 19];
 
 impl App {
-  pub(crate) fn top_bar(&mut self, ui: &mut egui::Ui) {
+  /// Photoshop's menu bar, the open documents and the settings button.
+  pub(crate) fn menu_bar(&mut self, ui: &mut egui::Ui) {
     let palette = theme::palette(ui);
-    egui::Panel::top("top-bar").exact_size(theme::BAR_HEIGHT).frame(Frame::NONE.fill(palette.chrome).inner_margin(Margin::symmetric(10, 6))).show(
+    egui::Panel::top("menu-bar").exact_size(theme::BAR_HEIGHT).frame(Frame::NONE.fill(palette.chrome).inner_margin(Margin::symmetric(8, 4))).show(
       ui,
       |ui| {
-        ui.horizontal_centered(|ui| {
-          ui.spacing_mut().item_spacing.x = 4.0;
-          self.popover_button(ui, Icon::Gallery, Popover::File, "ui-file");
-          self.popover_button(ui, Icon::Actions, Popover::Actions, "ui-actions");
-          ui.add_space(8.0);
-          self.popover_button(ui, Icon::Adjustments, Popover::Adjust, "ui-adjustments");
-          // Selection: picks the tool; clicking it again opens its options.
-          let selecting = self.canvas.tools.tool == Tool::Select;
-          if icons::button(ui, Icon::Selection, selecting, true, &self.i18n.tr("ui-selection")).clicked() {
-            if selecting {
-              self.toggle(Popover::Select);
-            }
-            (self.canvas.tools.tool, self.canvas.tools.hand) = (Tool::Select, false);
-          }
-          // Free Transform: a second click applies it.
-          let transforming = self.canvas.transforming();
-          if icons::button(ui, Icon::Transform, transforming, true, &self.i18n.tr("ui-transform")).clicked() {
-            if transforming { self.canvas.end_transform(&mut self.doc, true) } else { self.canvas.start_transform(&mut self.doc) }
-          }
-
+        egui::MenuBar::new().ui(ui, |ui| {
+          ui.menu_button(self.i18n.tr("ui-menu-file"), |ui| self.file_menu(ui));
+          ui.menu_button(self.i18n.tr("ui-menu-edit"), |ui| self.edit_menu(ui));
+          ui.menu_button(self.i18n.tr("ui-menu-image"), |ui| self.image_menu(ui));
+          ui.menu_button(self.i18n.tr("ui-menu-layer"), |ui| self.layer_menu(ui));
+          ui.menu_button(self.i18n.tr("ui-menu-select"), |ui| self.select_menu(ui));
+          ui.menu_button(self.i18n.tr("ui-menu-filter"), |ui| self.adjustments(ui, 6..usize::MAX));
+          ui.menu_button(self.i18n.tr("ui-menu-view"), |ui| self.view_menu(ui));
+          ui.menu_button(self.i18n.tr("ui-menu-window"), |ui| self.window_menu(ui));
+          ui.menu_button(self.i18n.tr("ui-menu-help"), |ui| self.help_menu(ui));
           ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            self.color_button(ui);
-            self.popover_button(ui, Icon::Layers, Popover::Layers, "ui-layers");
-            // Right to left: gradient, bucket, eraser, smudge, brush. Clicking the active tool
-            // opens its panel: brushes, or the bucket and gradient options.
-            for (tool, icon, tooltip) in [
-              (Tool::Text, Icon::Text, "ui-tooltip-text"),
-              (Tool::Gradient, Icon::Gradient, "ui-tooltip-gradient"),
-              (Tool::Fill, Icon::Bucket, "ui-tooltip-bucket"),
-              (Tool::Eraser, Icon::Eraser, "ui-tooltip-eraser"),
-              (Tool::Smudge, Icon::Smudge, "ui-tooltip-smudge"),
-              (Tool::Brush, Icon::Brush, "ui-tooltip-brush"),
-            ] {
-              let active = self.canvas.tools.tool == tool;
-              if icons::button(ui, icon, active, true, &self.i18n.tr(tooltip)).clicked() {
-                if active && tool != Tool::Text {
-                  self.toggle(if matches!(tool, Tool::Fill | Tool::Gradient) { Popover::Fill } else { Popover::Brushes });
-                }
-                self.canvas.tools.tool = tool;
-              }
+            if ui.button(self.i18n.tr("ui-preferences")).on_hover_text("Ctrl+K").clicked() {
+              self.preferences = Some(Page::General);
             }
-            // The open documents, in the space between the two groups of tools.
+            // The open documents, after the menus.
             if self.tabs.len() > 1 {
               ui.add_space(12.0);
               ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.add_space(12.0);
+                ui.add_space(24.0);
                 self.tab_strip(ui);
               });
             }
@@ -158,21 +118,21 @@ impl App {
     }
   }
 
-  fn toggle(&mut self, popover: Popover) {
-    // Panels that change the document finish the text being typed and apply a transform in
-    // progress first; brushes, color,
-    // fill and selection options leave it waiting on its bar.
-    if matches!(popover, Popover::Layers | Popover::Actions | Popover::Adjust) {
-      self.canvas.end_text(&mut self.doc);
-      self.canvas.end_transform(&mut self.doc, true);
+  /// Shows a window of the right dock (and saves that it is open).
+  fn show_window(&mut self, set: fn(&mut Panels)) {
+    let mut settings = self.settings.clone();
+    set(&mut settings.panels);
+    if settings != self.settings {
+      self.apply(settings);
     }
-    self.popover = if self.popover == Some(popover) { None } else { Some(popover) };
-    self.brush_category = None;
   }
 
-  fn popover_button(&mut self, ui: &mut egui::Ui, icon: Icon, popover: Popover, tooltip: &str) {
-    if icons::button(ui, icon, self.popover == Some(popover), true, &self.i18n.tr(tooltip)).clicked() {
-      self.toggle(popover);
+  /// Undo; while transforming it cancels the transform, like Ctrl+Z does.
+  fn undo(&mut self) {
+    if self.canvas.transforming() {
+      self.canvas.end_transform(&mut self.doc, false)
+    } else {
+      self.doc.undo();
     }
   }
 
@@ -197,104 +157,158 @@ impl App {
       painter.circle(at, 10.0, Color32::from_rgb(r, g, b), Stroke::new(2.0, Color32::WHITE));
     }
     if response.on_hover_text(self.i18n.tr("ui-color-tooltip")).clicked() {
-      self.toggle(Popover::Color);
+      self.show_window(|p| p.color = true);
     }
   }
 
-  pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) {
+  /// Photoshop's toolbar on the left: the tools, the color, the brush size and opacity, and
+  /// undo/redo. Clicking the active tool again opens its window in the dock.
+  pub(crate) fn toolbar(&mut self, ui: &mut egui::Ui) {
     let palette = theme::palette(ui);
-    egui::Panel::left("sidebar")
+    egui::Panel::left("toolbar")
       .exact_size(theme::SIDEBAR_WIDTH)
       .resizable(false)
       // The same margin on both sides keeps the sliders and buttons on the bar's center line.
-      .frame(Frame::NONE.fill(palette.chrome).inner_margin(Margin::symmetric(8, 18)))
+      .frame(Frame::NONE.fill(palette.chrome).inner_margin(Margin::symmetric(8, 10)))
       .show(ui, |ui| {
-        ui.vertical_centered(|ui| {
-          ui.spacing_mut().slider_width = 170.0;
-          let brush = self.canvas.tools.brush_mut();
-          ui.put(centered_slider(ui), egui::Slider::new(&mut brush.size, 1.0..=1000.0).logarithmic(true).vertical().show_value(false))
-            .on_hover_text(self.i18n.tr_args("ui-size", &[("size", (brush.size.round() as i64).into())]));
-          let size = brush.size.round() as i64;
-          ui.label(RichText::new(self.i18n.tr_args("ui-size-value", &[("size", size.into())])).small().color(palette.muted));
-          ui.add_space(10.0);
-          let picking = self.canvas.tools.picking;
-          if icons::button(ui, Icon::Eyedropper, picking, true, &self.i18n.tr("ui-eyedropper")).clicked() {
-            self.canvas.tools.picking = !picking;
-          }
-          ui.add_space(10.0);
-          let brush = self.canvas.tools.brush_mut();
-          let mut percent = brush.opacity * 100.0;
-          let opacity = ui.put(centered_slider(ui), egui::Slider::new(&mut percent, 1.0..=100.0).vertical().show_value(false));
-          if opacity.changed() {
-            brush.opacity = percent / 100.0;
-          }
-          opacity.on_hover_text(self.i18n.tr_args("ui-opacity", &[("opacity", (percent.round() as i64).into())]));
-          let percent = percent.round() as i64;
-          ui.label(RichText::new(self.i18n.tr_args("ui-opacity-value", &[("opacity", percent.into())])).small().color(palette.muted));
-          ui.add_space(18.0);
-          let (can_undo, can_redo) = (self.doc.history().can_undo(), self.doc.history().can_redo());
-          // Undo while transforming cancels the transform, like Ctrl+Z does.
-          if icons::button(ui, Icon::Undo, false, can_undo, &self.i18n.tr("ui-undo")).clicked() {
-            if self.canvas.transforming() {
-              self.canvas.end_transform(&mut self.doc, false)
-            } else {
-              self.doc.undo();
+        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
+          ui.vertical_centered(|ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            for (tool, icon, tooltip) in [
+              (Tool::Brush, Icon::Brush, "ui-tooltip-brush"),
+              (Tool::Smudge, Icon::Smudge, "ui-tooltip-smudge"),
+              (Tool::Eraser, Icon::Eraser, "ui-tooltip-eraser"),
+              (Tool::Fill, Icon::Bucket, "ui-tooltip-bucket"),
+              (Tool::Gradient, Icon::Gradient, "ui-tooltip-gradient"),
+              (Tool::Select, Icon::Selection, "ui-selection"),
+              (Tool::Text, Icon::Text, "ui-tooltip-text"),
+            ] {
+              let active = self.canvas.tools.tool == tool;
+              if icons::button(ui, icon, active, true, &self.i18n.tr(tooltip)).clicked() {
+                if active && tool != Tool::Text {
+                  if matches!(tool, Tool::Brush | Tool::Smudge | Tool::Eraser) {
+                    self.show_window(|p| p.brushes = true);
+                  } else {
+                    self.show_window(|p| p.options = true);
+                  }
+                }
+                (self.canvas.tools.tool, self.canvas.tools.hand) = (tool, false);
+              }
             }
+            // Free Transform: a second click applies it.
+            let transforming = self.canvas.transforming();
+            if icons::button(ui, Icon::Transform, transforming, true, &self.i18n.tr("ui-transform")).clicked() {
+              if transforming { self.canvas.end_transform(&mut self.doc, true) } else { self.canvas.start_transform(&mut self.doc) }
+            }
+            let picking = self.canvas.tools.picking;
+            if icons::button(ui, Icon::Eyedropper, picking, true, &self.i18n.tr("ui-eyedropper")).clicked() {
+              self.canvas.tools.picking = !picking;
+            }
+            ui.add_space(6.0);
+            self.color_button(ui);
+            ui.add_space(12.0);
+            ui.spacing_mut().slider_width = 130.0;
+            let brush = self.canvas.tools.brush_mut();
+            ui.put(centered_slider(ui), egui::Slider::new(&mut brush.size, 1.0..=1000.0).logarithmic(true).vertical().show_value(false))
+              .on_hover_text(self.i18n.tr_args("ui-size", &[("size", (brush.size.round() as i64).into())]));
+            let size = brush.size.round() as i64;
+            ui.label(RichText::new(self.i18n.tr_args("ui-size-value", &[("size", size.into())])).small().color(palette.muted));
+            ui.add_space(8.0);
+            let brush = self.canvas.tools.brush_mut();
+            let mut percent = brush.opacity * 100.0;
+            let opacity = ui.put(centered_slider(ui), egui::Slider::new(&mut percent, 1.0..=100.0).vertical().show_value(false));
+            if opacity.changed() {
+              brush.opacity = percent / 100.0;
+            }
+            opacity.on_hover_text(self.i18n.tr_args("ui-opacity", &[("opacity", (percent.round() as i64).into())]));
+            let percent = percent.round() as i64;
+            ui.label(RichText::new(self.i18n.tr_args("ui-opacity-value", &[("opacity", percent.into())])).small().color(palette.muted));
+            ui.add_space(12.0);
+            let (can_undo, can_redo) = (self.doc.history().can_undo() || self.canvas.transforming(), self.doc.history().can_redo());
+            if icons::button(ui, Icon::Undo, false, can_undo, &self.i18n.tr("ui-undo")).clicked() {
+              self.undo();
+            }
+            if icons::button(ui, Icon::Redo, false, can_redo, &self.i18n.tr("ui-redo")).clicked() {
+              self.doc.redo();
+            }
+          });
+        });
+      });
+  }
+
+  /// Photoshop's panels on the right: tool options, color, brushes and layers, each a window
+  /// that folds and that the Window menu shows or hides. Resizable; the content follows its width.
+  pub(crate) fn dock(&mut self, ui: &mut egui::Ui) {
+    let panels = self.settings.panels;
+    if !(panels.options || panels.color || panels.brushes || panels.layers) {
+      return;
+    }
+    let palette = theme::palette(ui);
+    egui::Panel::right("dock")
+      .resizable(true)
+      .default_size(320.0)
+      .size_range(260.0..=560.0)
+      .frame(Frame::NONE.fill(palette.chrome).inner_margin(Margin::same(10)))
+      .show(ui, |ui| {
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+          if panels.options {
+            window(self.i18n.tr("ui-window-options"), "options").show(ui, |ui| self.tool_options(ui));
+            ui.separator();
           }
-          if icons::button(ui, Icon::Redo, false, can_redo, &self.i18n.tr("ui-redo")).clicked() {
-            self.doc.redo();
+          if panels.color {
+            window(self.i18n.tr("ui-window-color"), "color").show(ui, |ui| self.color_panel(ui));
+            ui.separator();
+          }
+          if panels.brushes {
+            window(self.i18n.tr("ui-brushes"), "brushes").show(ui, |ui| self.brushes_panel(ui));
+            ui.separator();
+          }
+          if panels.layers {
+            window(self.i18n.tr("ui-layers"), "layers").show(ui, |ui| {
+              // Layer changes wait for the transform or the text being typed to end.
+              let busy = self.canvas.transforming() || self.canvas.typing();
+              if busy {
+                ui.label(RichText::new(self.i18n.tr("ui-layers-busy")).small().color(palette.muted));
+              }
+              ui.add_enabled_ui(!busy, |ui| self.layers_panel(ui));
+            });
           }
         });
       });
   }
 
-  /// The open floating panel, under the right end of the top bar (Actions under the left).
-  pub(crate) fn popovers(&mut self, ctx: &egui::Context) {
-    let Some(popover) = self.popover else { return };
-    // A press on the canvas closes the panel and does nothing else (like tapping away in
-    // Procreate): a see-through cover over the canvas, under the panel, takes it.
-    let screen = ctx.content_rect();
-    let canvas = egui::Rect::from_min_max(screen.min + vec2(theme::SIDEBAR_WIDTH, theme::BAR_HEIGHT), screen.max);
-    egui::Area::new(egui::Id::unique("popover-cover")).order(egui::Order::Middle).fixed_pos(canvas.min).show(ctx, |ui| {
-      let cover = ui.allocate_rect(egui::Rect::from_min_size(canvas.min, canvas.size()), Sense::click_and_drag());
-      if cover.clicked() || cover.drag_started() {
-        self.popover = None;
-      }
-    });
-    if self.popover.is_none() {
-      return;
-    }
-    let (anchor, pivot) = match popover {
-      Popover::File | Popover::Actions => (Pos2::new(screen.left() + 10.0, screen.top() + theme::BAR_HEIGHT + 6.0), Align2::LEFT_TOP),
-      _ => (Pos2::new(screen.right() - 10.0, screen.top() + theme::BAR_HEIGHT + 6.0), Align2::RIGHT_TOP),
-    };
-    egui::Area::new(egui::Id::unique("popover")).order(egui::Order::Foreground).fixed_pos(anchor).pivot(pivot).show(ctx, |ui| {
-      let palette = theme::palette(ui);
-      Frame::popup(ui.style()).fill(palette.panel).corner_radius(theme::PANEL_RADIUS).inner_margin(Margin::same(12)).show(ui, |ui| {
-        ui.set_width(match popover {
-          Popover::Color => 280.0,
-          Popover::Brushes => 330.0,
-          Popover::Layers => 320.0,
-          _ => 280.0,
+  /// The current tool's settings (Photoshop's options bar).
+  fn tool_options(&mut self, ui: &mut egui::Ui) {
+    match self.canvas.tools.tool {
+      Tool::Fill | Tool::Gradient => self.fill_panel(ui),
+      Tool::Select => self.select_panel(ui),
+      Tool::Brush | Tool::Smudge | Tool::Eraser => {
+        let selected = self.canvas.tools.selected();
+        ui.horizontal(|ui| {
+          ui.label(RichText::new(self.brush_name(selected)).strong());
+          ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui.button(self.i18n.tr("ui-studio")).clicked() {
+              self.studio = true;
+            }
+          });
         });
-        // A close button in the corner, for those who don't know Esc or tapping away.
-        let corner = ui.max_rect().right_top();
-        let close = egui::Rect::from_min_size(corner - vec2(22.0, 0.0), Vec2::splat(22.0));
-        if ui.put(close, egui::Button::new("×").frame(false)).on_hover_text(format!("{} (Esc)", self.i18n.tr("ui-close"))).clicked() {
-          self.popover = None;
-        }
-        match popover {
-          Popover::File => self.file_panel(ui),
-          Popover::Actions => self.actions_panel(ui),
-          Popover::Brushes => self.brushes_panel(ui),
-          Popover::Fill => self.fill_panel(ui),
-          Popover::Select => self.select_panel(ui),
-          Popover::Adjust => self.adjust_menu(ui),
-          Popover::Layers => self.layers_panel(ui),
-          Popover::Color => self.color_panel(ui),
-        }
-      });
-    });
+        let brush = self.canvas.tools.brush_mut();
+        egui::Grid::new("brush-options").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
+          ui.label(self.i18n.tr("ui-brush-size"));
+          ui.add(egui::Slider::new(&mut brush.size, 1.0..=1000.0).logarithmic(true).suffix(" px").fixed_decimals(0));
+          ui.end_row();
+          ui.label(self.i18n.tr("ui-layer-opacity"));
+          let mut percent = brush.opacity * 100.0;
+          if ui.add(egui::Slider::new(&mut percent, 1.0..=100.0).suffix(" %").fixed_decimals(0)).changed() {
+            brush.opacity = percent / 100.0;
+          }
+          ui.end_row();
+        });
+      }
+      Tool::Text => {
+        ui.label(RichText::new(self.i18n.tr("ui-options-none")).color(theme::palette(ui).muted));
+      }
+    }
   }
 
   pub(crate) fn title(&self, ui: &mut egui::Ui, id: &str) {
@@ -302,33 +316,155 @@ impl App {
     ui.add_space(6.0);
   }
 
+  fn edit_menu(&mut self, ui: &mut egui::Ui) {
+    let (can_undo, can_redo) = (self.doc.history().can_undo() || self.canvas.transforming(), self.doc.history().can_redo());
+    if item(ui, self.i18n.tr("ui-undo"), "Ctrl+Z", can_undo) {
+      self.undo();
+    }
+    if item(ui, self.i18n.tr("ui-redo"), "Ctrl+Shift+Z", can_redo) {
+      self.doc.redo();
+    }
+    ui.separator();
+    if item(ui, self.i18n.tr("ui-transform"), "Ctrl+T", true) {
+      if self.canvas.transforming() { self.canvas.end_transform(&mut self.doc, true) } else { self.canvas.start_transform(&mut self.doc) }
+    }
+    ui.separator();
+    if item(ui, self.i18n.tr("ui-preferences"), "Ctrl+K", true) {
+      self.preferences = Some(Page::General);
+    }
+  }
+
+  fn image_menu(&mut self, ui: &mut egui::Ui) {
+    ui.menu_button(self.i18n.tr("ui-adjustments"), |ui| self.adjustments(ui, 0..6));
+    ui.separator();
+    if item(ui, self.i18n.tr("ui-canvas-size"), "Ctrl+Alt+C", true) {
+      self.open_resize(false);
+    }
+    if item(ui, self.i18n.tr("ui-image-size"), "Ctrl+Alt+I", true) {
+      self.open_resize(true);
+    }
+    if item(ui, self.i18n.tr("ui-canvas-crop"), "", self.doc.selection().is_some()) {
+      self.crop();
+    }
+  }
+
+  fn layer_menu(&mut self, ui: &mut egui::Ui) {
+    let busy = self.canvas.transforming() || self.canvas.typing();
+    let index = self.doc.active();
+    let (count, group, masked) = (self.doc.layers().len(), self.doc.layers()[index].is_group(), self.doc.layers()[index].mask.is_some());
+    let mut action = None;
+    ui.add_enabled_ui(!busy, |ui| {
+      if item(ui, self.i18n.tr("ui-layer-new"), "Ctrl+Shift+N", true) {
+        action = Some(LayerAction::New);
+      }
+      if item(ui, self.i18n.tr("ui-layer-duplicate"), "Ctrl+J", true) {
+        action = Some(LayerAction::Duplicate(index));
+      }
+      if item(ui, self.i18n.tr("ui-layer-delete"), "", count > 1) {
+        action = Some(LayerAction::Delete(index));
+      }
+      if item(ui, self.i18n.tr("ui-layer-merge-down"), "Ctrl+E", index > 0) {
+        action = Some(LayerAction::MergeDown(index));
+      }
+      ui.separator();
+      if item(ui, self.i18n.tr("ui-layer-group"), "Ctrl+G", true) {
+        action = Some(LayerAction::Group(index));
+      }
+      if item(ui, self.i18n.tr("ui-layer-ungroup"), "Ctrl+Shift+G", group) {
+        action = Some(LayerAction::Ungroup(index));
+      }
+      ui.separator();
+      if item(ui, self.i18n.tr("ui-layer-forward"), "Ctrl+]", index + 1 < count) {
+        action = Some(LayerAction::Up(index));
+      }
+      if item(ui, self.i18n.tr("ui-layer-backward"), "Ctrl+[", true) {
+        action = Some(LayerAction::Down(index));
+      }
+      ui.separator();
+      if item(ui, self.i18n.tr("ui-mask-add"), "", !masked) {
+        action = Some(LayerAction::AddMask(index));
+      }
+    });
+    if let Some(action) = action {
+      self.layer_action(action);
+    }
+  }
+
+  fn select_menu(&mut self, ui: &mut egui::Ui) {
+    let selected = self.doc.selection().is_some();
+    if item(ui, self.i18n.tr("ui-select-all"), "Ctrl+A", true) {
+      self.doc.select_all();
+    }
+    if item(ui, self.i18n.tr("ui-select-none"), "Ctrl+D", selected) {
+      self.doc.deselect();
+    }
+    if item(ui, self.i18n.tr("ui-select-invert"), "Ctrl+Shift+I", selected) {
+      self.doc.invert_selection();
+    }
+  }
+
+  fn view_menu(&mut self, ui: &mut egui::Ui) {
+    self.guides_section(ui);
+    ui.separator();
+    if item(ui, self.i18n.tr("ui-view-hide"), "Tab", true) {
+      self.hidden = true;
+    }
+  }
+
+  fn window_menu(&mut self, ui: &mut egui::Ui) {
+    let mut panels = self.settings.panels;
+    ui.checkbox(&mut panels.options, self.i18n.tr("ui-window-options"));
+    ui.checkbox(&mut panels.color, self.i18n.tr("ui-window-color"));
+    ui.checkbox(&mut panels.brushes, self.i18n.tr("ui-brushes"));
+    ui.checkbox(&mut panels.layers, self.i18n.tr("ui-layers"));
+    if panels != self.settings.panels {
+      let mut settings = self.settings.clone();
+      settings.panels = panels;
+      self.apply(settings);
+    }
+    ui.separator();
+    // Animation Assist (Procreate): every top-level layer or group becomes a frame.
+    let mut animation = self.doc.animation.enabled;
+    if ui.checkbox(&mut animation, self.i18n.tr("ui-animation-assist")).on_hover_text(self.i18n.tr("ui-animation-help")).changed() {
+      self.doc.animation.enabled = animation;
+      self.stop_playback();
+    }
+    if item(ui, self.i18n.tr("ui-studio"), "", true) {
+      self.studio = true;
+    }
+  }
+
+  fn help_menu(&mut self, ui: &mut egui::Ui) {
+    if item(ui, self.i18n.tr("ui-about"), "", true) {
+      self.preferences = Some(Page::About);
+    }
+    if item(ui, self.i18n.tr("ui-update-check-now"), "", true) {
+      self.updates.check_now();
+      self.preferences = Some(Page::About);
+    }
+    ui.separator();
+    ui.hyperlink_to(self.i18n.tr("ui-about-repository"), env!("CARGO_PKG_REPOSITORY"));
+  }
+
   /// Photoshop's File menu: new, open (and recent files), close, save, save as, save a copy,
   /// revert, place, export and quit.
-  fn file_panel(&mut self, ui: &mut egui::Ui) {
-    self.title(ui, "ui-file");
-    let item = |ui: &mut egui::Ui, text: String, shortcut: &str, enabled: bool| {
-      ui.add_enabled(enabled, egui::Button::new(text).shortcut_text(shortcut).min_size(vec2(ui.available_width(), 30.0))).clicked()
-    };
-    let mut close = true;
+  fn file_menu(&mut self, ui: &mut egui::Ui) {
     if item(ui, self.i18n.tr("ui-file-new"), "Ctrl+N", true) {
       self.open_home(true);
-    } else if item(ui, self.i18n.tr("ui-file-open"), "Ctrl+O", true) {
+    }
+    if item(ui, self.i18n.tr("ui-file-open"), "Ctrl+O", true) {
       self.request(Pending::Open(None));
-    } else {
-      close = false;
     }
     let muted = theme::palette(ui).muted;
-    egui::CollapsingHeader::new(self.i18n.tr("ui-file-recent")).id_salt("recent").show(ui, |ui| {
+    ui.menu_button(self.i18n.tr("ui-file-recent"), |ui| {
       if self.settings.recent.is_empty() {
         ui.label(RichText::new(self.i18n.tr("ui-file-recent-none")).color(muted));
       }
       for path in self.settings.recent.clone() {
         let name = path.file_stem().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
-        let response =
-          ui.add(egui::Button::new(name).frame(false).min_size(vec2(ui.available_width(), 26.0))).on_hover_text(path.display().to_string());
+        let response = ui.button(name).on_hover_text(path.display().to_string());
         if response.clicked() {
           self.request(Pending::Open(Some(path.clone())));
-          close = true;
         }
         response.context_menu(|ui| {
           if ui.button(self.i18n.tr("ui-file-recent-remove")).clicked() {
@@ -342,39 +478,31 @@ impl App {
     let saved = self.path.is_some();
     if item(ui, self.i18n.tr("ui-file-close"), "Ctrl+W", true) {
       self.request(Pending::Home);
-      close = true;
     }
     if item(ui, self.i18n.tr("ui-file-save"), "Ctrl+S", true) {
       self.save(false);
-      close = true;
     }
     if item(ui, self.i18n.tr("ui-file-save-as"), "Ctrl+Shift+S", true) {
       self.save(true);
-      close = true;
     }
     if item(ui, self.i18n.tr("ui-file-save-all"), "", self.tabs.len() > 1) {
       self.save_all();
-      close = true;
     }
     if item(ui, self.i18n.tr("ui-file-save-copy"), "Ctrl+Alt+S", true) {
       self.save_copy();
-      close = true;
     }
     if item(ui, self.i18n.tr("ui-file-revert"), "F12", saved && self.dirty()) {
       self.request(Pending::Revert);
-      close = true;
     }
     ui.separator();
     if item(ui, self.i18n.tr("ui-file-place"), "", true) {
       self.place();
-      close = true;
     }
     for (format, id, shortcut) in
       [(Export::Png, "ui-file-export-png", "Ctrl+Alt+Shift+W"), (Export::Jpeg, "ui-file-export-jpeg", ""), (Export::Webp, "ui-file-export-webp", "")]
     {
       if item(ui, self.i18n.tr(id), shortcut, true) {
         self.export(format);
-        close = true;
       }
     }
     // Animations: with Animation Assist on.
@@ -385,80 +513,15 @@ impl App {
       (Export::PngSequence, "ui-file-export-sequence"),
       (Export::Mp4, "ui-file-export-mp4"),
     ] {
-      let response = ui.add_enabled(animated, egui::Button::new(self.i18n.tr(id)).min_size(vec2(ui.available_width(), 30.0)));
+      let response = ui.add_enabled(animated, egui::Button::new(self.i18n.tr(id)));
       if response.on_disabled_hover_text(self.i18n.tr("ui-file-animation-only")).clicked() {
         self.export(format);
-        close = true;
       }
     }
     ui.separator();
     if item(ui, self.i18n.tr("ui-file-quit"), "Ctrl+Q", true) {
       self.request(Pending::Close);
-      close = true;
     }
-    if close {
-      self.popover = None;
-    }
-  }
-
-  fn actions_panel(&mut self, ui: &mut egui::Ui) {
-    self.title(ui, "ui-actions");
-    let wide = |ui: &mut egui::Ui, text: String, shortcut: &str| {
-      ui.add(egui::Button::new(text).shortcut_text(shortcut).min_size(vec2(ui.available_width(), 30.0))).clicked()
-    };
-    if ui
-      .add_enabled(self.doc.selection().is_some(), egui::Button::new(self.i18n.tr("ui-canvas-crop")).min_size(vec2(ui.available_width(), 30.0)))
-      .clicked()
-    {
-      self.crop();
-    }
-    if wide(ui, self.i18n.tr("ui-canvas-size"), "Ctrl+Alt+C") {
-      self.open_resize(false);
-    }
-    if wide(ui, self.i18n.tr("ui-image-size"), "Ctrl+Alt+I") {
-      self.open_resize(true);
-    }
-    ui.separator();
-    // Animation Assist (Procreate): every top-level layer or group becomes a frame.
-    let mut animation = self.doc.animation.enabled;
-    if ui
-      .checkbox(&mut animation, RichText::new(self.i18n.tr("ui-animation-assist")).strong())
-      .on_hover_text(self.i18n.tr("ui-animation-help"))
-      .changed()
-    {
-      self.doc.animation.enabled = animation;
-      self.stop_playback();
-    }
-    ui.separator();
-    self.guides_section(ui);
-    ui.separator();
-    // Settings: applied and saved as soon as they change.
-    let mut settings = self.settings.clone();
-    let muted = theme::palette(ui).muted;
-    ui.label(RichText::new(self.i18n.tr("ui-settings")).strong());
-    ui.label(RichText::new(self.i18n.tr("ui-theme")).color(muted));
-    ui.horizontal(|ui| {
-      ui.selectable_value(&mut settings.theme, Theme::System, self.i18n.tr("ui-theme-system"));
-      ui.selectable_value(&mut settings.theme, Theme::Dark, self.i18n.tr("ui-theme-dark"));
-      ui.selectable_value(&mut settings.theme, Theme::Light, self.i18n.tr("ui-theme-light"));
-    });
-    ui.label(RichText::new(self.i18n.tr("ui-language")).color(muted));
-    ui.horizontal(|ui| {
-      ui.selectable_value(&mut settings.language, None, self.i18n.tr("ui-theme-system"));
-      // Language names are written in their own language, not translated.
-      ui.selectable_value(&mut settings.language, Some(Language::En), "English");
-      ui.selectable_value(&mut settings.language, Some(Language::Es), "Español");
-    });
-    ui.checkbox(&mut settings.check_updates, self.i18n.tr("ui-check-updates"));
-    ui.checkbox(&mut settings.quickshape, self.i18n.tr("ui-quickshape")).on_hover_text(self.i18n.tr("ui-quickshape-help"));
-    if cfg!(windows) {
-      ui.checkbox(&mut settings.wintab, self.i18n.tr("ui-wintab")).on_hover_text(self.i18n.tr("ui-wintab-help"));
-    }
-    if settings != self.settings {
-      self.apply(settings);
-    }
-    ui.separator();
-    ui.label(RichText::new(format!("rustcreate {}", env!("CARGO_PKG_VERSION"))).small().color(theme::palette(ui).muted));
   }
 
   /// The drawing guide and Drawing Assist.
@@ -589,13 +652,12 @@ impl App {
   /// The brush library: categories on the left, the category's brushes on the right with
   /// previews painted by the engine. Picking a brush sets it for the current tool.
   fn brushes_panel(&mut self, ui: &mut egui::Ui) {
-    self.title(ui, "ui-brushes");
     let palette = theme::palette(ui);
     let selected = self.canvas.tools.selected();
     let category = *self.brush_category.get_or_insert(self.canvas.tools.library.entries[selected].category);
     ui.horizontal_top(|ui| {
       ui.vertical(|ui| {
-        ui.set_width(96.0);
+        ui.set_width(100.0);
         for (index, id) in CATEGORIES.iter().enumerate() {
           if ui.selectable_label(category == index, self.i18n.tr(id)).clicked() {
             self.brush_category = Some(index);
@@ -604,9 +666,9 @@ impl App {
       });
       ui.separator();
       ui.vertical(|ui| {
-        // At most half the window tall, so the canvas stays in view.
-        let tall = (ui.ctx().content_rect().height() * 0.5).clamp(200.0, 360.0);
-        egui::ScrollArea::vertical().max_height(tall).show(ui, |ui| {
+        // As wide as the dock leaves, so it never spills out when the window grows or shrinks.
+        let wide = (ui.available_width() - 16.0).max(80.0);
+        egui::ScrollArea::vertical().id_salt("brush-list").max_height(320.0).show(ui, |ui| {
           let indices: Vec<usize> =
             (0..self.canvas.tools.library.entries.len()).filter(|&i| self.canvas.tools.library.entries[i].category == category).collect();
           if indices.is_empty() {
@@ -619,9 +681,10 @@ impl App {
               .corner_radius(6)
               .inner_margin(Margin::symmetric(8, 4))
               .show(ui, |ui| {
-                ui.set_width(186.0);
+                ui.set_width(wide);
                 ui.label(RichText::new(self.brush_name(index)).strong());
-                ui.add(egui::Image::new(&thumbnail).fit_to_exact_size(vec2(186.0, 37.0)));
+                // The preview keeps its 256 × 52 shape.
+                ui.add(egui::Image::new(&thumbnail).fit_to_exact_size(vec2(wide, wide * 52.0 / 256.0)));
               });
             if ui.interact(response.response.rect, ui.scope_id().with(("brush", index)), Sense::click()).clicked() {
               self.canvas.tools.select(index);
@@ -631,7 +694,7 @@ impl App {
       });
     });
     ui.separator();
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
       if icons::button(ui, Icon::Duplicate, false, true, &self.i18n.tr("ui-brush-duplicate")).clicked() {
         let name = self.i18n.tr_args("ui-brush-copy-name", &[("name", self.brush_name(selected).into())]);
         let copy = self.canvas.tools.library.duplicate(selected, name);
@@ -644,7 +707,6 @@ impl App {
       }
       if ui.button(self.i18n.tr("ui-studio")).clicked() {
         self.studio = true;
-        self.popover = None;
       }
       if ui.button(self.i18n.tr("ui-brush-import")).on_hover_text(self.i18n.tr("ui-brush-import-help")).clicked()
         && let Some(path) =
@@ -709,20 +771,18 @@ impl App {
 
   fn layers_panel(&mut self, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-      ui.label(RichText::new(self.i18n.tr("ui-layers")).strong().size(15.0));
-      ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        if icons::button(ui, Icon::Plus, false, true, &self.i18n.tr("ui-layer-new")).clicked() {
-          self.doc.add_layer();
-        }
-      });
+      if icons::button(ui, Icon::Plus, false, true, &self.i18n.tr("ui-layer-new")).clicked() {
+        self.doc.add_layer();
+      }
+      ui.add(egui::Label::new(RichText::new(self.i18n.tr("ui-layers-drag")).small().color(theme::palette(ui).muted)).wrap());
     });
-    ui.add_space(8.0);
+    ui.add_space(4.0);
     // Changes that add, remove or reorder layers wait until the panel is drawn: indices taken
     // while drawing would point past the end or at another layer.
     let mut action: Option<LayerAction> = None;
     let palette = theme::palette(ui);
     let tall = (ui.ctx().content_rect().height() * 0.5).clamp(200.0, 460.0);
-    egui::ScrollArea::vertical().max_height(tall).auto_shrink([false, true]).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("layer-list").max_height(tall).auto_shrink([false, true]).show(ui, |ui| {
       ui.spacing_mut().item_spacing.y = 6.0;
       for index in (0..self.doc.layers().len()).rev() {
         let layer = &self.doc.layers()[index];
@@ -733,19 +793,52 @@ impl App {
         if layer.mask.is_some() {
           shown.push_str("  ◐");
         }
-        let indent = self.doc.depth(index) as f32 * 16.0;
+        // A group says how many layers it holds; the rows under it are indented behind a line.
+        if group {
+          let content = self.doc.layers().iter().filter(|l| l.parent() == Some(id)).count();
+          shown.push_str(&format!("  ({content})"));
+        }
+        let depth = self.doc.depth(index);
+        let indent = depth as f32 * 18.0;
         let active = index == self.doc.active();
 
         // The whole row selects; the eye and the lock sit on top of it.
-        let (rect, row) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
+        // Dragging a row onto another moves the layer there (a group with its content).
+        let (full, row) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click_and_drag());
+        row.dnd_set_drag_payload(LayerDrag(index));
+        let rect = full.with_min_x(full.left() + indent);
+        // One accent line per level the row is nested, joining it to its group above.
+        for level in 0..depth {
+          let x = full.left() + 7.0 + level as f32 * 18.0;
+          ui.painter().vline(x, full.y_range().expand(3.0), Stroke::new(2.0, theme::ACCENT.gamma_multiply(0.6)));
+        }
         let fill = if active {
           palette.selected
         } else if row.hovered() {
           palette.control.gamma_multiply(1.4)
+        } else if group {
+          // Groups stand out from plain layers.
+          palette.control.lerp_to_gamma(theme::ACCENT, 0.18)
         } else {
           palette.control
         };
         ui.painter().rect_filled(rect, 8, fill);
+        if group {
+          ui.painter().rect_stroke(rect, 8, Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.7)), egui::StrokeKind::Inside);
+        }
+        if let Some(from) = row.dnd_hover_payload::<LayerDrag>().map(|d| d.0).filter(|&from| from != index) {
+          if group {
+            // Dropped on a group: it goes inside, so the whole row lights up.
+            ui.painter().rect_stroke(rect, 8, Stroke::new(3.0, theme::ACCENT), egui::StrokeKind::Inside);
+          } else {
+            // Otherwise a line where it lands, at this row's level (inside its group or not).
+            let y = if from < index { rect.top() } else { rect.bottom() };
+            ui.painter().hline(rect.x_range(), y, Stroke::new(3.0, theme::ACCENT));
+          }
+        }
+        if let Some(from) = row.dnd_release_payload::<LayerDrag>().map(|d| d.0).filter(|&from| from != index) {
+          action = Some(LayerAction::Move(from, index));
+        }
         let button_at = |n: f32| egui::Rect::from_center_size(egui::pos2(rect.right() - 22.0 - n * 34.0, rect.center().y), Vec2::splat(32.0));
         if ui
           .put(button_at(0.0), |ui: &mut egui::Ui| {
@@ -761,7 +854,7 @@ impl App {
           self.doc.layer_mut(index).expect("layer").locked = !locked;
         }
         // A small badge says what kind of layer it is: a group, a text, or plain pixels.
-        let badge = egui::Rect::from_center_size(egui::pos2(rect.left() + 22.0 + indent, rect.center().y), Vec2::splat(20.0));
+        let badge = egui::Rect::from_center_size(egui::pos2(rect.left() + 22.0, rect.center().y), Vec2::splat(20.0));
         let ink = if hidden { palette.muted } else { palette.ink };
         if group || text {
           icons::paint(ui.painter(), badge, if group { Icon::Layers } else { Icon::Text }, ink);
@@ -772,14 +865,18 @@ impl App {
         if self.renaming.as_ref().is_some_and(|(layer, _)| *layer == id) {
           let (_, typed) = self.renaming.as_mut().expect("renaming");
           let edit = ui.put(label.shrink2(vec2(0.0, 6.0)), egui::TextEdit::singleline(typed).font(egui::FontId::proportional(14.5)));
-          edit.request_focus();
+          // Enter (or a click elsewhere) ends it: focus is only asked for while the field has not
+          // given it up, or it would never be lost and the field never close.
+          let done = edit.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter));
           if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.renaming = None;
-          } else if edit.lost_focus() {
+          } else if done {
             let (_, typed) = self.renaming.take().expect("renaming");
             if !typed.trim().is_empty() && typed != name {
               self.doc.rename_layer(index, typed.trim());
             }
+          } else {
+            edit.request_focus();
           }
         } else {
           let galley = ui.painter().layout_no_wrap(shown, egui::FontId::proportional(14.5), ink);
@@ -902,24 +999,73 @@ impl App {
       });
     });
 
+    if let Some(action) = action {
+      self.layer_action(action);
+    }
+  }
+
+  fn layer_action(&mut self, action: LayerAction) {
     match action {
-      Some(LayerAction::Duplicate(i)) => self.doc.duplicate_layer(i),
-      Some(LayerAction::MergeDown(i)) => self.doc.merge_down(i),
-      Some(LayerAction::Delete(i)) => self.doc.delete_layer(i),
-      Some(LayerAction::Group(i)) => self.doc.group_layer(i),
-      Some(LayerAction::Ungroup(i)) => self.doc.ungroup(i),
-      None => false,
-    };
+      LayerAction::New => {
+        self.doc.add_layer();
+      }
+      LayerAction::Duplicate(i) => {
+        self.doc.duplicate_layer(i);
+      }
+      LayerAction::MergeDown(i) => {
+        self.doc.merge_down(i);
+      }
+      LayerAction::Delete(i) => {
+        self.doc.delete_layer(i);
+      }
+      LayerAction::Group(i) => {
+        self.doc.group_layer(i);
+      }
+      LayerAction::Ungroup(i) => {
+        self.doc.ungroup(i);
+      }
+      LayerAction::Up(i) => {
+        self.doc.move_up(i);
+      }
+      LayerAction::Down(i) => {
+        self.doc.move_down(i);
+      }
+      LayerAction::Move(from, to) => {
+        self.doc.drop_layer(from, to);
+      }
+      LayerAction::AddMask(i) => {
+        self.doc.add_mask(i);
+      }
+    }
   }
 }
 
-/// A layer panel change that adds, removes or reorders layers, applied after drawing.
+/// A layer change that adds, removes or reorders layers, applied after drawing.
 enum LayerAction {
+  New,
   Duplicate(usize),
   MergeDown(usize),
   Delete(usize),
   Group(usize),
   Ungroup(usize),
+  Up(usize),
+  Down(usize),
+  /// Dropped on another row: from, to.
+  Move(usize, usize),
+  AddMask(usize),
+}
+
+/// The layer row being dragged in the layers panel.
+struct LayerDrag(usize);
+
+/// A menu entry with its shortcut.
+fn item(ui: &mut egui::Ui, text: String, shortcut: &str, enabled: bool) -> bool {
+  ui.add_enabled(enabled, egui::Button::new(text).shortcut_text(shortcut)).clicked()
+}
+
+/// A window of the dock: a header that folds it.
+fn window(title: String, id: &str) -> egui::CollapsingHeader {
+  egui::CollapsingHeader::new(RichText::new(title).strong().size(14.0)).id_salt(id).default_open(true)
 }
 
 /// Where a sidebar slider goes: on the bar's center line (egui lays a vertical slider out from

@@ -172,7 +172,6 @@ fn segmented<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, items: &[(T,
 
 impl App {
   pub(crate) fn color_panel(&mut self, ui: &mut egui::Ui) {
-    self.title(ui, "ui-color");
     let primary = self.canvas.tools.primary;
     // Keep the hue while saturation or brightness is 0, where RGB forgets it.
     let mut hsv = self.color_hsv.filter(|hsv| rgb(*hsv) == primary).unwrap_or_else(|| Hsva::from_srgb(primary));
@@ -289,20 +288,25 @@ impl App {
     let list = &mut self.palettes.list;
     self.palette = self.palette.min(list.len() - 1);
     let mut picked = None;
-    ui.horizontal(|ui| {
-      egui::ComboBox::from_id_salt("palette").selected_text(list[self.palette].name.clone()).width(ui.available_width() - 70.0).show_ui(ui, |ui| {
-        for (i, palette) in list.iter().enumerate() {
-          ui.selectable_value(&mut self.palette, i, &palette.name);
-        }
-      });
-      if ui.button("+").on_hover_text(self.i18n.tr("ui-palette-new")).clicked() {
-        list.push(Palette { name: self.i18n.tr("ui-palette-new-name"), colors: Vec::new() });
-        self.palette = list.len() - 1;
-      }
+    // The buttons first (right to left), then the list takes exactly what is left: a row wider
+    // than the dock made the dock grow, and then the row again, on every frame.
+    let row = Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
+    ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center), |ui| {
       if ui.add_enabled(list.len() > 1, egui::Button::new("−")).on_hover_text(self.i18n.tr("ui-palette-delete")).clicked() {
         list.remove(self.palette);
         self.palette = self.palette.saturating_sub(1);
       }
+      if ui.button("+").on_hover_text(self.i18n.tr("ui-palette-new")).clicked() {
+        list.push(Palette { name: self.i18n.tr("ui-palette-new-name"), colors: Vec::new() });
+        self.palette = list.len() - 1;
+      }
+      // A long name is cut short instead of widening the list.
+      ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+      egui::ComboBox::from_id_salt("palette").selected_text(list[self.palette].name.clone()).width(ui.available_width()).show_ui(ui, |ui| {
+        for (i, palette) in list.iter().enumerate() {
+          ui.selectable_value(&mut self.palette, i, &palette.name);
+        }
+      });
     });
     let palette = &mut list[self.palette];
     ui.add(egui::TextEdit::singleline(&mut palette.name).desired_width(f32::INFINITY));
@@ -332,7 +336,7 @@ impl App {
     ui.add_space(4.0);
     ui.label(RichText::new(self.i18n.tr("ui-palette-remove-help")).small().color(theme::palette(ui).muted));
     ui.add_space(4.0);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
       if ui.button(self.i18n.tr("ui-palette-import")).on_hover_text(self.i18n.tr("ui-palette-import-help")).clicked() {
         self.import_palettes();
       }

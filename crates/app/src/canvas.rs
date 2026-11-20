@@ -817,6 +817,11 @@ impl Canvas {
     self.transform = Some(Free { lifted, center, half, offset: Vec2::ZERO, scale: Vec2::splat(1.0), angle: 0.0, drag: None });
   }
 
+  /// A text layer is being typed on the canvas.
+  pub fn typing(&self) -> bool {
+    self.text.is_some()
+  }
+
   pub fn transforming(&self) -> bool {
     self.transform.is_some()
   }
@@ -1086,13 +1091,22 @@ impl Canvas {
     let angle = if brush.follow { 0.0 } else { brush.angle.to_radians() } + view.rotation;
     let squash = brush.roundness.clamp(0.05, 1.0);
     let (sin, cos) = angle.sin_cos();
-    let points: Vec<Pos2> = (0..64)
-      .map(|i| {
-        let t = i as f32 / 64.0 * std::f32::consts::TAU;
-        let (x, y) = (t.cos() * radius, t.sin() * radius * squash);
-        at + vec2(x * cos - y * sin, x * sin + y * cos)
-      })
-      .collect();
+    let ring = |radius: f32| -> Vec<Pos2> {
+      (0..64)
+        .map(|i| {
+          let t = i as f32 / 64.0 * std::f32::consts::TAU;
+          let (x, y) = (t.cos() * radius, t.sin() * radius * squash);
+          at + vec2(x * cos - y * sin, x * sin + y * cos)
+        })
+        .collect()
+    };
+    // The outline sits where the tip covers half, so a soft brush does not look bigger than its
+    // mark; a faint ring shows how far its fading edge still reaches.
+    let half = brush.tip.half_coverage(brush.hardness, brush.size / 2.0);
+    if half < 0.9 {
+      painter.add(egui::Shape::closed_line(ring(radius), egui::Stroke::new(1.0, egui::Color32::from_white_alpha(70))));
+    }
+    let points = ring(radius * half);
     for stroke in [dark, light] {
       painter.add(egui::Shape::closed_line(points.clone(), stroke));
     }

@@ -16,6 +16,10 @@ const CHECK_EVERY: Duration = Duration::from_secs(5 * 60 * 60);
 pub enum Status {
   #[default]
   Idle,
+  /// Settings → About → "Check now" is waiting for GitHub.
+  Checking,
+  /// The last check asked for found nothing newer.
+  UpToDate,
   Available(Update),
   Downloading(f32),
   Failed(String),
@@ -23,9 +27,14 @@ pub enum Status {
   Quit,
 }
 
+enum Request {
+  Check,
+  Install(Update),
+}
+
 pub struct Updates {
   status: Arc<Mutex<Status>>,
-  install: Sender<Update>,
+  requests: Sender<Request>,
   /// Settings → "Check for updates" (ADR 0002).
   checks: Arc<AtomicBool>,
 }
@@ -35,7 +44,7 @@ impl Updates {
     let checks = Arc::new(AtomicBool::new(checks));
     let enabled = checks.clone();
     let status = Arc::new(Mutex::new(Status::Idle));
-    let (install, requests) = mpsc::channel::<Update>();
+    let (sender, requests) = mpsc::channel::<Request>();
     let shared = status.clone();
     std::thread::spawn(move || {
       let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
@@ -54,7 +63,13 @@ impl Updates {
           set(Status::Available(found));
         }
         match requests.recv_timeout(CHECK_EVERY) {
-          Ok(chosen) => {
+          // Asked for: says so either way, and a failure is shown.
+          Ok(Request::Check) => match runtime.block_on(updater.check(kind)) {
+            Ok(Some(found)) => set(Status::Available(found)),
+            Ok(None) => set(Status::UpToDate),
+            Err(error) => set(Status::Failed(error.to_string())),
+          },
+          Ok(Request::Install(chosen)) => {
             set(Status::Downloading(0.0));
             let result = runtime.block_on(updater.download(&chosen, |p| set(Status::Downloading(p))));
             match result.and_then(|path| update::apply(&chosen, &path)) {
@@ -67,7 +82,7 @@ impl Updates {
         }
       }
     });
-    Self { status, install, checks }
+    Self { status, requests: sender, checks }
   }
 
   pub fn status(&self) -> Status {
@@ -75,7 +90,13 @@ impl Updates {
   }
 
   pub fn install(&self, update: Update) {
-    let _ = self.install.send(update);
+    let _ = self.requests.send(Request::Install(update));
+  }
+
+  /// Checks now, whatever the setting says; `status()` tells the result.
+  pub fn check_now(&self) {
+    *self.status.lock().unwrap() = Status::Checking;
+    let _ = self.requests.send(Request::Check);
   }
 
   pub fn set_checks(&self, on: bool) {

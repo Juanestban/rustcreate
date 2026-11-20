@@ -41,6 +41,24 @@ pub struct Settings {
   pub sizes: Vec<SavedSize>,
   /// Windows: read the pen through Wintab (older tablets) besides Windows Ink.
   pub wintab: bool,
+  /// The right dock's windows (Window menu).
+  pub panels: Panels,
+}
+
+/// Which windows the right dock shows, top to bottom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Panels {
+  pub options: bool,
+  pub color: bool,
+  pub brushes: bool,
+  pub layers: bool,
+}
+
+impl Default for Panels {
+  fn default() -> Self {
+    Self { options: true, color: true, brushes: true, layers: true }
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -98,6 +116,7 @@ impl Default for Settings {
       background: None,
       sizes: Vec::new(),
       wintab: false,
+      panels: Panels::default(),
     }
   }
 }
@@ -156,6 +175,7 @@ mod tests {
       background: None,
       sizes: vec![SavedSize { name: "Card".into(), width: 1050, height: 600, dpi: 300 }],
       wintab: true,
+      panels: Panels { color: false, ..Panels::default() },
     };
     let json = serde_json::to_string(&settings).unwrap();
     assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), settings);

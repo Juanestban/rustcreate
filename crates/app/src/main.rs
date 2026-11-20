@@ -21,7 +21,6 @@ use std::path::PathBuf;
 
 use rustcreate_core::Document;
 use settings::{Settings, Theme};
-use ui::chrome::Popover;
 use updates::{Status, Updates};
 
 fn main() -> eframe::Result {
@@ -100,7 +99,8 @@ pub(crate) struct App {
   tabs: Vec<Option<tabs::Tab>>,
   /// The shown tab.
   tab: usize,
-  popover: Option<Popover>,
+  /// The settings window, on this page.
+  preferences: Option<ui::preferences::Page>,
   /// The layer being renamed and the text typed so far.
   renaming: Option<(u64, String)>,
   /// A layer opacity drag in progress (one undo step per drag).
@@ -169,7 +169,7 @@ impl App {
       doc,
       canvas,
       path: None,
-      popover: None,
+      preferences: None,
       renaming: None,
       editing_slider: false,
       hidden: false,
@@ -558,6 +558,10 @@ impl App {
     if key(m, egui::Key::N) {
       self.open_home(true);
     }
+    // Ctrl+K: Preferences (Photoshop).
+    if key(m, egui::Key::K) {
+      self.preferences = Some(ui::preferences::Page::General);
+    }
     // Ctrl+Tab and Ctrl+Shift+Tab: the next and previous tab, before Tab hides the interface.
     if self.tabs.len() > 1 && key(m | shift, egui::Key::Tab) {
       self.switch_tab((self.tab + self.tabs.len() - 1) % self.tabs.len());
@@ -567,7 +571,6 @@ impl App {
     }
     if key(egui::Modifiers::NONE, egui::Key::Tab) {
       self.hidden = !self.hidden;
-      self.popover = None;
     }
   }
 
@@ -646,30 +649,28 @@ impl eframe::App for App {
     self.update_banner(ui);
     if self.home.is_some() {
       self.home_screen(ui);
+      self.preferences_window(&ctx);
       self.dialogs(&ctx);
       log::ui_finished();
       return;
     }
     self.shortcuts(&ctx);
     if !self.hidden {
-      self.top_bar(ui);
-      self.sidebar(ui);
+      self.menu_bar(ui);
+      self.toolbar(ui);
+      self.dock(ui);
     }
     self.timeline(ui);
     self.export_progress(&ctx);
-    // Esc closes an open panel before anything else (a transform, a selection) sees it.
-    if self.popover.is_some() && !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-      self.popover = None;
-    }
     let keys = !ctx.egui_wants_keyboard_input() && self.confirm.is_none() && self.adjusting.is_none() && self.resize.is_none();
     let render_state = self.render_state.clone();
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(ui.visuals().extreme_bg_color)).show(ui, |ui| {
       self.canvas.show(ui, &render_state, &mut self.doc, keys, &self.i18n);
     });
     if !self.hidden {
-      self.popovers(&ctx);
       self.brush_studio(&ctx);
     }
+    self.preferences_window(&ctx);
     self.adjust_dialog(&ctx);
     self.resize_dialog(&ctx);
     self.dialogs(&ctx);
@@ -686,12 +687,13 @@ impl App {
   /// The non-modal "new version" banner (ADR 0002).
   fn update_banner(&mut self, ui: &mut egui::Ui) {
     let status = self.updates.status();
-    if matches!(status, Status::Idle) {
+    // Checking and "up to date" are only shown in Settings → About.
+    if matches!(status, Status::Idle | Status::Checking | Status::UpToDate) {
       return;
     }
     egui::Panel::top("update-banner").show(ui, |ui| {
       ui.horizontal(|ui| match status {
-        Status::Idle => {}
+        Status::Idle | Status::Checking | Status::UpToDate => {}
         Status::Available(update) => {
           ui.label(self.i18n.tr_args("ui-update-available", &[("version", update.version.to_string().into())]));
           if ui.button(self.i18n.tr("ui-update-install")).clicked() {

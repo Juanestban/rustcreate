@@ -54,7 +54,6 @@ pub fn projects(settings: &Settings) -> Vec<(PathBuf, bool)> {
 impl App {
   pub(crate) fn open_home(&mut self, back: bool) {
     self.stop_playback();
-    self.popover = None;
     self.home = Some(Home::new(&self.settings, back));
   }
 
@@ -66,6 +65,9 @@ impl App {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
           if self.home.as_ref().is_some_and(|h| h.back) && ui.button(self.i18n.tr("ui-home-back")).clicked() {
             self.home = None;
+          }
+          if ui.button(self.i18n.tr("ui-preferences")).clicked() {
+            self.preferences = Some(super::preferences::Page::General);
           }
           if ui.button(self.i18n.tr("ui-file-open")).clicked() {
             self.request(Pending::Open(None));

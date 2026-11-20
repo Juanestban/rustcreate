@@ -168,6 +168,39 @@ impl Document {
     true
   }
 
+  /// Drag and drop in the layers panel: moves layer `index` (a group with its content) to row
+  /// `target`, as one undo step. Dropped on a group's row it goes inside that group, on top;
+  /// dropped on any other row it takes that row's place, in that row's group (or out of one).
+  pub fn drop_layer(&mut self, index: usize, target: usize) -> bool {
+    if index >= self.layers.len() || target >= self.layers.len() {
+      return false;
+    }
+    let moving = block(&self.layers, index);
+    // Not onto itself or into its own content.
+    if moving.contains(&target) {
+      return false;
+    }
+    let (target_id, into) = (self.layers[target].id, self.layers[target].group);
+    let parent = if into { Some(target_id) } else { self.layers[target].parent };
+    let up = index < target;
+    let active_id = self.layers[self.active].id;
+    self.checkpoint();
+    let mut moved: Vec<Layer> = self.layers.drain(moving).collect();
+    moved.last_mut().expect("a block has its layer").parent = parent;
+    let target = self.layers.iter().position(|l| l.id == target_id).expect("the target stays");
+    let at = if into {
+      // Right under the group's own row: the top of its content.
+      target
+    } else if up {
+      target + 1
+    } else {
+      block(&self.layers, target).start
+    };
+    self.layers.splice(at..at, moved);
+    self.active = self.layers.iter().position(|l| l.id == active_id).expect("still in the stack");
+    true
+  }
+
   /// Ctrl+]: one step up among the layers next to it; a group's whole content moves with it,
   /// and a layer at the top of its group steps out of it.
   pub fn move_up(&mut self, index: usize) -> bool {
@@ -252,6 +285,35 @@ mod tests {
     assert!(groups_valid(doc.layers()));
     assert!(doc.ungroup(1));
     assert_eq!(names(&doc), ["Layer 2", "Layer 4", "Layer 1"]);
+    // Dragged from the bottom to the top: one undo step brings it back.
+    assert!(doc.drop_layer(0, 2));
+    assert_eq!(names(&doc), ["Layer 4", "Layer 1", "Layer 2"]);
+    assert!(doc.undo());
+    assert_eq!(names(&doc), ["Layer 2", "Layer 4", "Layer 1"]);
+    assert!(!doc.drop_layer(1, 1));
+  }
+
+  #[test]
+  fn dropping_moves_layers_in_and_out_of_groups() {
+    let mut doc = Document::new(8, 8);
+    doc.add_layer();
+    doc.add_layer();
+    assert!(doc.group_layer(1));
+    assert_eq!(names(&doc), ["Layer 1", "Layer 2<4", "Group 4", "Layer 3"]);
+    // Onto the group's row: inside it, on top.
+    assert!(doc.drop_layer(0, 2));
+    assert_eq!(names(&doc), ["Layer 2<4", "Layer 1<4", "Group 4", "Layer 3"]);
+    // Onto a top-level row: out of the group, above that row.
+    assert!(doc.drop_layer(1, 3));
+    assert_eq!(names(&doc), ["Layer 2<4", "Group 4", "Layer 3", "Layer 1"]);
+    // Down onto a row in the group: back in, under it.
+    assert!(doc.drop_layer(3, 0));
+    assert_eq!(names(&doc), ["Layer 1<4", "Layer 2<4", "Group 4", "Layer 3"]);
+    assert!(groups_valid(doc.layers()));
+    // A group cannot go into its own content; each drop is one undo step.
+    assert!(!doc.drop_layer(2, 0));
+    assert!(doc.undo());
+    assert_eq!(names(&doc), ["Layer 2<4", "Group 4", "Layer 3", "Layer 1"]);
   }
 
   #[test]

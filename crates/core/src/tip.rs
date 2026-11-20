@@ -53,6 +53,17 @@ impl Tip {
     }
   }
 
+  /// How far from the center (in radii) the tip still covers half: where a soft brush's mark
+  /// seems to end, for the cursor outline. Image tips count as their whole size.
+  pub fn half_coverage(self, hardness: f32, radius: f32) -> f32 {
+    if matches!(self, Tip::Image(_)) {
+      return 1.0;
+    }
+    let inner = hardness.clamp(0.0, 1.0).min(1.0 - 1.0 / radius.max(1.0)).max(0.0);
+    // The edge is a smoothstep from `inner` to 1: it is at one half halfway.
+    inner + (1.0 - inner) / 2.0
+  }
+
   /// How far from the center (in radii) the shape can reach when rotated.
   pub fn reach(self) -> f32 {
     if self == Tip::Square { std::f32::consts::SQRT_2 } else { 1.0 }
@@ -111,6 +122,14 @@ impl Grain {
 
 /// The smoothstep edge of the analytic tips: 1 inside the hard core, 0 at distance 1. The soft
 /// band is at least one pixel wide so hard edges stay antialiased.
+#[test]
+fn half_coverage_is_where_the_edge_crosses_one_half() {
+  for hardness in [0.0, 0.5, 0.9] {
+    let at = Tip::Round.half_coverage(hardness, 100.0);
+    assert!((edge(at, hardness, 100.0) - 0.5).abs() < 1e-4, "hardness {hardness}");
+  }
+}
+
 fn edge(distance: f32, hardness: f32, radius: f32) -> f32 {
   let inner = hardness.clamp(0.0, 1.0).min(1.0 - 1.0 / radius.max(1.0)).max(0.0);
   if distance <= inner {
